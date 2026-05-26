@@ -934,16 +934,12 @@
                                     </div>
                                     <div class="col-md-4 text-end">
                                         ${status === 'Pending' ? `
-                                            <!-- TEMPORARILY DISABLED: Approve/Reject functionality will be added later -->
-                                            <span class="badge bg-warning fs-6">Pending (Approve/Reject coming soon)</span>
-                                            <!--
                                             <button class="btn btn-success btn-sm mb-2 w-100" onclick="approveRegistration(${reg.id})">
                                                 <i class="bi bi-check-circle"></i> Approve
                                             </button>
                                             <button class="btn btn-danger btn-sm w-100" onclick="rejectRegistration(${reg.id})">
                                                 <i class="bi bi-x-circle"></i> Reject
                                             </button>
-                                            -->
                                         ` : `
                                             <span class="badge bg-${status === 'Approved' ? 'success' : 'danger'} fs-6">${status}</span>
                                         `}
@@ -971,9 +967,7 @@
 
         /**
          * Approve registration
-         * TEMPORARILY DISABLED - Will be implemented later
          */
-        /*
         async function approveRegistration(registrationId) {
             if (!confirm('Are you sure you want to approve this registration?')) {
                 return;
@@ -1010,9 +1004,7 @@
 
         /**
          * Reject registration
-         * TEMPORARILY DISABLED - Will be implemented later
          */
-        /*
         async function rejectRegistration(registrationId) {
             const reason = prompt('Please enter rejection reason:');
             
@@ -1050,7 +1042,6 @@
                 showLoading(false);
             }
         }
-        */
 
         /**
          * View topic details
