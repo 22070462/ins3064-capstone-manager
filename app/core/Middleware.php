@@ -42,22 +42,31 @@ class Middleware
 
     /**
      * Check if user is authenticated
-     * Redirects to login page if not authenticated
+     * Redirects to login page if not authenticated (or returns JSON for API)
      * 
      * @param string $redirectUrl URL to redirect if not authenticated
+     * @param bool   $returnJson  Return JSON response instead of redirect
      * @return bool True if authenticated, false otherwise
      */
-    public function requireAuth(string $redirectUrl = '/login'): bool
+    public function requireAuth(string $redirectUrl = '/login', bool $returnJson = false): bool
     {
         if (!$this->isAuthenticated()) {
-            $this->redirectTo($redirectUrl);
+            if ($returnJson) {
+                $this->jsonUnauthorized('Authentication required');
+            } else {
+                $this->redirectTo($redirectUrl);
+            }
             return false;
         }
 
         // Check session timeout
         if ($this->isSessionExpired()) {
             $this->logout();
-            $this->redirectTo($redirectUrl . '?timeout=1');
+            if ($returnJson) {
+                $this->jsonUnauthorized('Session expired');
+            } else {
+                $this->redirectTo($redirectUrl . '?timeout=1');
+            }
             return false;
         }
 
@@ -274,18 +283,16 @@ class Middleware
         // Regenerate session ID to prevent session fixation
         session_regenerate_id(true);
 
-        // Store user data in session
-        $_SESSION['user'] = [
-            'id'       => $userData['id'],
-            'username' => $userData['username'],
-            'role'     => $userData['role'],
-            'status'   => $userData['status'] ?? 'Active'
-        ];
+        // Store ALL user data in session (including role-specific fields like lecturer_id, student_id, full_name)
+        $_SESSION['user'] = $userData;
 
         // Set initial activity time
         $_SESSION['last_activity'] = time();
         $_SESSION['login_time'] = time();
         $_SESSION['ip_address'] = $_SERVER['REMOTE_ADDR'] ?? 'unknown';
+        
+        // Debug log
+        error_log("Middleware login() - Session user data stored: " . print_r($_SESSION['user'], true));
     }
 
     /**

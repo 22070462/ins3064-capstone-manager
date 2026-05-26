@@ -387,11 +387,21 @@ class TopicRepository
                     t.status,
                     t.max_students,
                     t.created_at,
+                    t.created_by,
                     d.name as department_name,
                     d.code as department_code,
+                    l.id as lecturer_id,
                     l.full_name as lecturer_name,
                     l.lecturer_code,
                     l.max_quota,
+                    (SELECT COUNT(*) 
+                     FROM topic_registrations tr 
+                     WHERE tr.topic_id = t.id 
+                     AND tr.status = 'Approved') as approved_count,
+                    (SELECT COUNT(*) 
+                     FROM topic_registrations tr 
+                     WHERE tr.topic_id = t.id 
+                     AND tr.status = 'Pending') as pending_count,
                     (SELECT COUNT(*) 
                      FROM topic_registrations tr 
                      WHERE tr.topic_id = t.id 
@@ -537,5 +547,652 @@ class TopicRepository
             'reason'   => 'Student is eligible to register',
             'deadline' => $deadline['setting_value'] ?? null
         ];
+    }
+
+    /**
+     * Create a new topic (Lecturer only)
+     * 
+     * @param array $data Topic data
+     * @param int $lecturerId Lecturer ID
+     * @param int $userId User ID for audit logging
+     * @return array Result with topic ID
+     * @throws Exception If validation fails
+     */
+    public function createTopic(array $data, int $lecturerId, int $userId): array
+    {
+        try {
+            // Begin transaction
+            $this->db->beginTransaction();
+
+            // Validate required fields
+            $required = ['title', 'description', 'department_id'];
+            foreach ($required as $field) {
+                if (empty($data[$field])) {
+                    throw new Exception("Missing required field: {$field}", 400);
+                }
+            }
+
+            // Validate lecturer exists
+            $this->validateLecturerExists($lecturerId);
+
+            // Validate department exists
+            $sql = "SELECT id FROM departments WHERE id = :id LIMIT 1";
+            $stmt = $this->db->prepare($sql);
+            $stmt->execute(['id' => $data['department_id']]);
+            if (!$stmt->fetch()) {
+                throw new Exception('Department not found', 404);
+            }
+
+            // Insert topic
+            $sql = "INSERT INTO topics 
+                    (title, description, department_id, created_by, status, max_students, created_at, updated_at) 
+                    VALUES 
+                    (:title, :description, :department_id, :created_by, :status, :max_students, NOW(), NOW())";
+
+            $stmt = $this->db->prepare($sql);
+            $stmt->execute([
+                'title'         => $data['title'],
+                'description'   => $data['description'],
+                'department_id' => $data['department_id'],
+                'created_by'    => $lecturerId,
+                'status'        => $data['status'] ?? 'Draft',
+                'max_students'  => $data['max_students'] ?? 5
+            ]);
+
+            $topicId = (int) $this->db->lastInsertId();
+
+            // Insert tags if provided
+            if (!empty($data['tags']) && is_array($data['tags'])) {
+                $this->insertTopicTags($topicId, $data['tags']);
+            }
+
+            // Log activity
+            $this->logActivity(
+                $userId,
+                'CREATE',
+                'topics',
+                $topicId,
+                "Created new topic: {$data['title']}"
+            );
+
+            // Commit transaction
+            $this->db->commit();
+
+            // Fetch created topic
+            $topic = $this->getTopicById($topicId);
+
+            return [
+                'success' => true,
+                'message' => 'Topic created successfully',
+                'data'    => $topic
+            ];
+
+        } catch (Exception $e) {
+            // Rollback on error
+            if ($this->db->inTransaction()) {
+                $this->db->rollBack();
+            }
+            throw $e;
+        }
+    }
+
+    /**
+     * Update an existing topic
+     * 
+     * @param int $topicId Topic ID
+     * @param array $data Updated data
+     * @param int $lecturerId Lecturer ID (for ownership verification)
+     * @param int $userId User ID for audit logging
+     * @return array Result
+     * @throws Exception If validation fails
+     */
+    public function updateTopic(int $topicId, array $data, int $lecturerId, int $userId): array
+    {
+        try {
+            // Begin transaction
+            $this->db->beginTransaction();
+
+            // Verify topic exists and belongs to lecturer
+            $sql = "SELECT id, title, created_by FROM topics WHERE id = :id LIMIT 1";
+            $stmt = $this->db->prepare($sql);
+            $stmt->execute(['id' => $topicId]);
+            $topic = $stmt->fetch();
+
+            if (!$topic) {
+                throw new Exception('Topic not found', 404);
+            }
+
+            if ($topic['created_by'] != $lecturerId) {
+                throw new Exception('You can only update your own topics', 403);
+            }
+
+            // Build update query dynamically
+            $updateFields = [];
+            $params = ['id' => $topicId];
+
+            if (isset($data['title'])) {
+                $updateFields[] = 'title = :title';
+                $params['title'] = $data['title'];
+            }
+
+            if (isset($data['description'])) {
+                $updateFields[] = 'description = :description';
+                $params['description'] = $data['description'];
+            }
+
+            if (isset($data['status'])) {
+                $updateFields[] = 'status = :status';
+                $params['status'] = $data['status'];
+            }
+
+            if (isset($data['max_students'])) {
+                $updateFields[] = 'max_students = :max_students';
+                $params['max_students'] = $data['max_students'];
+            }
+
+            if (empty($updateFields)) {
+                throw new Exception('No fields to update', 400);
+            }
+
+            $updateFields[] = 'updated_at = NOW()';
+
+            $sql = "UPDATE topics SET " . implode(', ', $updateFields) . " WHERE id = :id";
+            $stmt = $this->db->prepare($sql);
+            $stmt->execute($params);
+
+            // Update tags if provided
+            if (isset($data['tags']) && is_array($data['tags'])) {
+                // Delete old tags
+                $sql = "DELETE FROM topic_tags WHERE topic_id = :topic_id";
+                $stmt = $this->db->prepare($sql);
+                $stmt->execute(['topic_id' => $topicId]);
+
+                // Insert new tags
+                $this->insertTopicTags($topicId, $data['tags']);
+            }
+
+            // Log activity
+            $this->logActivity(
+                $userId,
+                'UPDATE',
+                'topics',
+                $topicId,
+                "Updated topic: {$topic['title']}"
+            );
+
+            // Commit transaction
+            $this->db->commit();
+
+            // Fetch updated topic
+            $updatedTopic = $this->getTopicById($topicId);
+
+            return [
+                'success' => true,
+                'message' => 'Topic updated successfully',
+                'data'    => $updatedTopic
+            ];
+
+        } catch (Exception $e) {
+            if ($this->db->inTransaction()) {
+                $this->db->rollBack();
+            }
+            throw $e;
+        }
+    }
+
+    /**
+     * Get topics created by a specific lecturer
+     * 
+     * @param int $lecturerId Lecturer ID
+     * @return array List of topics
+     */
+    public function getLecturerTopics(int $lecturerId): array
+    {
+        $sql = "SELECT 
+                    t.id,
+                    t.title,
+                    t.description,
+                    t.status,
+                    t.max_students,
+                    t.created_at,
+                    t.updated_at,
+                    d.name as department_name,
+                    d.code as department_code,
+                    (SELECT COUNT(*) 
+                     FROM topic_registrations tr 
+                     WHERE tr.topic_id = t.id 
+                     AND tr.status = 'Approved') as approved_count,
+                    (SELECT COUNT(*) 
+                     FROM topic_registrations tr 
+                     WHERE tr.topic_id = t.id 
+                     AND tr.status = 'Pending') as pending_count,
+                    (SELECT GROUP_CONCAT(tag_name SEPARATOR ', ') 
+                     FROM topic_tags tt 
+                     WHERE tt.topic_id = t.id) as tags
+                FROM topics t
+                INNER JOIN departments d ON t.department_id = d.id
+                WHERE t.created_by = :lecturer_id
+                ORDER BY t.created_at DESC";
+
+        $stmt = $this->db->prepare($sql);
+        $stmt->execute(['lecturer_id' => $lecturerId]);
+
+        return $stmt->fetchAll();
+    }
+
+    /**
+     * Get registrations for lecturer's topics
+     * 
+     * @param int $lecturerId Lecturer ID
+     * @param string|null $status Filter by status (optional)
+     * @return array List of registrations
+     */
+    public function getLecturerRegistrations(int $lecturerId, ?string $status = null): array
+    {
+        $sql = "SELECT 
+                    tr.id,
+                    tr.topic_id,
+                    tr.student_id,
+                    tr.status,
+                    tr.registered_at,
+                    tr.reviewed_at,
+                    tr.rejection_reason,
+                    s.student_code,
+                    s.full_name as student_name,
+                    s.email as student_email,
+                    s.phone as student_phone,
+                    s.enrollment_year,
+                    t.title as topic_title,
+                    d.name as department_name
+                FROM topic_registrations tr
+                INNER JOIN students s ON tr.student_id = s.id
+                INNER JOIN topics t ON tr.topic_id = t.id
+                INNER JOIN departments d ON s.department_id = d.id
+                WHERE tr.lecturer_id = :lecturer_id";
+
+        if ($status !== null) {
+            $sql .= " AND tr.status = :status";
+        }
+
+        $sql .= " ORDER BY tr.registered_at DESC";
+
+        $stmt = $this->db->prepare($sql);
+        
+        $params = ['lecturer_id' => $lecturerId];
+        if ($status !== null) {
+            $params['status'] = $status;
+        }
+        
+        $stmt->execute($params);
+
+        return $stmt->fetchAll();
+    }
+
+    /**
+     * Insert topic tags
+     * 
+     * @param int $topicId Topic ID
+     * @param array $tags Array of tag names
+     * @return void
+     */
+    private function insertTopicTags(int $topicId, array $tags): void
+    {
+        if (empty($tags)) {
+            return;
+        }
+
+        $sql = "INSERT INTO topic_tags (topic_id, tag_name, created_at) VALUES (:topic_id, :tag_name, NOW())";
+        $stmt = $this->db->prepare($sql);
+
+        foreach ($tags as $tag) {
+            $tag = trim($tag);
+            if (!empty($tag)) {
+                $stmt->execute([
+                    'topic_id' => $topicId,
+                    'tag_name' => $tag
+                ]);
+            }
+        }
+    }
+
+    /**
+     * Delete a topic
+     * 
+     * @param int $topicId Topic ID
+     * @param int $lecturerId Lecturer ID (for ownership verification)
+     * @param int $userId User ID for audit logging
+     * @return array Result
+     * @throws Exception If validation fails
+     */
+    public function deleteTopic(int $topicId, int $lecturerId, int $userId): array
+    {
+        try {
+            // Begin transaction
+            $this->db->beginTransaction();
+
+            // Verify topic exists and belongs to lecturer
+            $sql = "SELECT id, title, created_by FROM topics WHERE id = :id LIMIT 1";
+            $stmt = $this->db->prepare($sql);
+            $stmt->execute(['id' => $topicId]);
+            $topic = $stmt->fetch();
+
+            if (!$topic) {
+                throw new Exception('Topic not found', 404);
+            }
+
+            if ($topic['created_by'] != $lecturerId) {
+                throw new Exception('You can only delete your own topics', 403);
+            }
+
+            // Check if topic has approved registrations
+            $sql = "SELECT COUNT(*) as count 
+                    FROM topic_registrations 
+                    WHERE topic_id = :topic_id 
+                    AND status = 'Approved'";
+            
+            $stmt = $this->db->prepare($sql);
+            $stmt->execute(['topic_id' => $topicId]);
+            $result = $stmt->fetch();
+
+            if ($result['count'] > 0) {
+                throw new Exception('Cannot delete topic with approved registrations', 400);
+            }
+
+            // Delete topic tags
+            $sql = "DELETE FROM topic_tags WHERE topic_id = :topic_id";
+            $stmt = $this->db->prepare($sql);
+            $stmt->execute(['topic_id' => $topicId]);
+
+            // Delete pending registrations
+            $sql = "DELETE FROM topic_registrations 
+                    WHERE topic_id = :topic_id 
+                    AND status = 'Pending'";
+            $stmt = $this->db->prepare($sql);
+            $stmt->execute(['topic_id' => $topicId]);
+
+            // Delete topic
+            $sql = "DELETE FROM topics WHERE id = :id";
+            $stmt = $this->db->prepare($sql);
+            $stmt->execute(['id' => $topicId]);
+
+            // Log activity
+            $this->logActivity(
+                $userId,
+                'DELETE',
+                'topics',
+                $topicId,
+                "Deleted topic: {$topic['title']}"
+            );
+
+            // Commit transaction
+            $this->db->commit();
+
+            return [
+                'success' => true,
+                'message' => 'Topic deleted successfully',
+                'data'    => ['topic_id' => $topicId]
+            ];
+
+        } catch (Exception $e) {
+            if ($this->db->inTransaction()) {
+                $this->db->rollBack();
+            }
+            throw $e;
+        }
+    }
+
+    /**
+     * Approve a student registration
+     * 
+     * @param int $registrationId Registration ID
+     * @param int $lecturerId Lecturer ID (for ownership verification)
+     * @param int $userId User ID for audit logging
+     * @return array Result
+     * @throws Exception If validation fails
+     */
+    public function approveRegistration(int $registrationId, int $lecturerId, int $userId): array
+    {
+        try {
+            // Begin transaction
+            $this->db->beginTransaction();
+
+            // Verify registration exists and belongs to lecturer
+            $sql = "SELECT tr.id, tr.status, tr.lecturer_id, tr.student_id, tr.topic_id,
+                           s.full_name as student_name, t.title as topic_title
+                    FROM topic_registrations tr
+                    INNER JOIN students s ON tr.student_id = s.id
+                    INNER JOIN topics t ON tr.topic_id = t.id
+                    WHERE tr.id = :id 
+                    LIMIT 1";
+            
+            $stmt = $this->db->prepare($sql);
+            $stmt->execute(['id' => $registrationId]);
+            $registration = $stmt->fetch();
+
+            if (!$registration) {
+                throw new Exception('Registration not found', 404);
+            }
+
+            if ($registration['lecturer_id'] != $lecturerId) {
+                throw new Exception('You can only approve registrations for your own topics', 403);
+            }
+
+            if ($registration['status'] !== 'Pending') {
+                throw new Exception("Registration is already {$registration['status']}", 400);
+            }
+
+            // Check lecturer quota before approving
+            $this->validateLecturerQuota($lecturerId);
+
+            // Update registration status
+            $sql = "UPDATE topic_registrations 
+                    SET status = 'Approved', reviewed_at = NOW() 
+                    WHERE id = :id";
+            
+            $stmt = $this->db->prepare($sql);
+            $stmt->execute(['id' => $registrationId]);
+
+            // Log activity
+            $this->logActivity(
+                $userId,
+                'UPDATE',
+                'topic_registrations',
+                $registrationId,
+                "Approved registration for student: {$registration['student_name']}, topic: {$registration['topic_title']}"
+            );
+
+            // Commit transaction
+            $this->db->commit();
+
+            // Fetch updated registration
+            $updatedRegistration = $this->getRegistrationById($registrationId);
+
+            return [
+                'success' => true,
+                'message' => 'Registration approved successfully',
+                'data'    => $updatedRegistration
+            ];
+
+        } catch (Exception $e) {
+            if ($this->db->inTransaction()) {
+                $this->db->rollBack();
+            }
+            throw $e;
+        }
+    }
+
+    /**
+     * Reject a student registration
+     * 
+     * @param int $registrationId Registration ID
+     * @param int $lecturerId Lecturer ID (for ownership verification)
+     * @param string $reason Rejection reason
+     * @param int $userId User ID for audit logging
+     * @return array Result
+     * @throws Exception If validation fails
+     */
+    public function rejectRegistration(int $registrationId, int $lecturerId, string $reason, int $userId): array
+    {
+        try {
+            // Begin transaction
+            $this->db->beginTransaction();
+
+            // Verify registration exists and belongs to lecturer
+            $sql = "SELECT tr.id, tr.status, tr.lecturer_id, tr.student_id, tr.topic_id,
+                           s.full_name as student_name, t.title as topic_title
+                    FROM topic_registrations tr
+                    INNER JOIN students s ON tr.student_id = s.id
+                    INNER JOIN topics t ON tr.topic_id = t.id
+                    WHERE tr.id = :id 
+                    LIMIT 1";
+            
+            $stmt = $this->db->prepare($sql);
+            $stmt->execute(['id' => $registrationId]);
+            $registration = $stmt->fetch();
+
+            if (!$registration) {
+                throw new Exception('Registration not found', 404);
+            }
+
+            if ($registration['lecturer_id'] != $lecturerId) {
+                throw new Exception('You can only reject registrations for your own topics', 403);
+            }
+
+            if ($registration['status'] !== 'Pending') {
+                throw new Exception("Registration is already {$registration['status']}", 400);
+            }
+
+            // Update registration status
+            $sql = "UPDATE topic_registrations 
+                    SET status = 'Rejected', reviewed_at = NOW(), rejection_reason = :reason 
+                    WHERE id = :id";
+            
+            $stmt = $this->db->prepare($sql);
+            $stmt->execute([
+                'id' => $registrationId,
+                'reason' => $reason
+            ]);
+
+            // Log activity
+            $this->logActivity(
+                $userId,
+                'UPDATE',
+                'topic_registrations',
+                $registrationId,
+                "Rejected registration for student: {$registration['student_name']}, topic: {$registration['topic_title']}, reason: {$reason}"
+            );
+
+            // Commit transaction
+            $this->db->commit();
+
+            // Fetch updated registration
+            $updatedRegistration = $this->getRegistrationById($registrationId);
+
+            return [
+                'success' => true,
+                'message' => 'Registration rejected successfully',
+                'data'    => $updatedRegistration
+            ];
+
+        } catch (Exception $e) {
+            if ($this->db->inTransaction()) {
+                $this->db->rollBack();
+            }
+            throw $e;
+        }
+    }
+
+    /**
+     * Withdraw/Cancel a student's topic registration
+     * 
+     * Business Rules:
+     * - Only Pending or Approved registrations can be withdrawn
+     * - Student can only withdraw their own registration
+     * - Uses database transaction for data integrity
+     * - Logs activity to audit trail
+     * 
+     * @param int $studentId Student ID (for ownership verification)
+     * @param int $userId User ID for audit logging
+     * @return array Result with success status and message
+     * @throws Exception If validation fails or no active registration found
+     */
+    public function withdrawRegistration(int $studentId, int $userId): array
+    {
+        try {
+            // Begin transaction for data integrity
+            $this->db->beginTransaction();
+
+            // Find student's active registration (Pending or Approved)
+            $sql = "SELECT 
+                        tr.id,
+                        tr.student_id,
+                        tr.topic_id,
+                        tr.lecturer_id,
+                        tr.status,
+                        tr.registered_at,
+                        t.title as topic_title,
+                        l.full_name as lecturer_name
+                    FROM topic_registrations tr
+                    INNER JOIN topics t ON tr.topic_id = t.id
+                    INNER JOIN lecturers l ON tr.lecturer_id = l.id
+                    WHERE tr.student_id = :student_id 
+                    AND tr.status IN ('Pending', 'Approved')
+                    LIMIT 1";
+
+            $stmt = $this->db->prepare($sql);
+            $stmt->execute(['student_id' => $studentId]);
+            $registration = $stmt->fetch();
+
+            // Validate registration exists
+            if (!$registration) {
+                throw new Exception(
+                    'No active registration found. You can only withdraw Pending or Approved registrations.',
+                    404
+                );
+            }
+
+            // Store registration details for logging
+            $registrationId = $registration['id'];
+            $topicTitle = $registration['topic_title'];
+            $lecturerName = $registration['lecturer_name'];
+            $previousStatus = $registration['status'];
+
+            // Delete the registration
+            $sql = "DELETE FROM topic_registrations WHERE id = :id";
+            $stmt = $this->db->prepare($sql);
+            $stmt->execute(['id' => $registrationId]);
+
+            // Log activity to audit trail
+            $this->logActivity(
+                $userId,
+                'DELETE',
+                'topic_registrations',
+                $registrationId,
+                "Student withdrew {$previousStatus} registration for topic: '{$topicTitle}' (Lecturer: {$lecturerName})"
+            );
+
+            // Commit transaction
+            $this->db->commit();
+
+            return [
+                'success' => true,
+                'message' => 'Registration withdrawn successfully. You can now register for other topics.',
+                'data'    => [
+                    'registration_id' => $registrationId,
+                    'topic_title'     => $topicTitle,
+                    'previous_status' => $previousStatus,
+                    'withdrawn_at'    => date('Y-m-d H:i:s')
+                ]
+            ];
+
+        } catch (Exception $e) {
+            // Rollback transaction on any error
+            if ($this->db->inTransaction()) {
+                $this->db->rollBack();
+            }
+
+            // Re-throw exception to be handled by controller
+            throw $e;
+        }
     }
 }

@@ -1,0 +1,22 @@
+# Root .htaccess - Handle routing for both root and public directory
+
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    RewriteBase /capstone_project/
+    
+    # Don't rewrite files or directories that exist
+    RewriteCond %{REQUEST_FILENAME} !-f
+    RewriteCond %{REQUEST_FILENAME} !-d
+    
+    # Don't rewrite if accessing public directory directly
+    RewriteCond %{REQUEST_URI} !^/capstone_project/public/
+    
+    # Route everything else through index.php
+    RewriteRule ^(.*)$ index.php [QSA,L]
+</IfModule>
+
+# Disable directory browsing
+Options -Indexes
+
+# Set default charset
+AddDefaultCharset UTF-8

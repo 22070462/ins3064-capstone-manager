@@ -80,12 +80,12 @@ class Router
     /**
      * Register a GET route
      * 
-     * @param string $path       Route path (e.g., '/users/{id}')
-     * @param string $controller Controller class name
-     * @param string $method     Controller method name
+     * @param string          $path       Route path (e.g., '/users/{id}')
+     * @param string|callable $controller Controller class name or closure
+     * @param string|null     $method     Controller method name (null for closures)
      * @return void
      */
-    public function get(string $path, string $controller, string $method): void
+    public function get(string $path, $controller, $method = null): void
     {
         $this->addRoute('GET', $path, $controller, $method);
     }
@@ -93,12 +93,12 @@ class Router
     /**
      * Register a POST route
      * 
-     * @param string $path       Route path
-     * @param string $controller Controller class name
-     * @param string $method     Controller method name
+     * @param string          $path       Route path
+     * @param string|callable $controller Controller class name or closure
+     * @param string|null     $method     Controller method name (null for closures)
      * @return void
      */
-    public function post(string $path, string $controller, string $method): void
+    public function post(string $path, $controller, $method = null): void
     {
         $this->addRoute('POST', $path, $controller, $method);
     }
@@ -106,12 +106,12 @@ class Router
     /**
      * Register a PUT route
      * 
-     * @param string $path       Route path
-     * @param string $controller Controller class name
-     * @param string $method     Controller method name
+     * @param string          $path       Route path
+     * @param string|callable $controller Controller class name or closure
+     * @param string|null     $method     Controller method name (null for closures)
      * @return void
      */
-    public function put(string $path, string $controller, string $method): void
+    public function put(string $path, $controller, $method = null): void
     {
         $this->addRoute('PUT', $path, $controller, $method);
     }
@@ -119,12 +119,12 @@ class Router
     /**
      * Register a DELETE route
      * 
-     * @param string $path       Route path
-     * @param string $controller Controller class name
-     * @param string $method     Controller method name
+     * @param string          $path       Route path
+     * @param string|callable $controller Controller class name or closure
+     * @param string|null     $method     Controller method name (null for closures)
      * @return void
      */
-    public function delete(string $path, string $controller, string $method): void
+    public function delete(string $path, $controller, $method = null): void
     {
         $this->addRoute('DELETE', $path, $controller, $method);
     }
@@ -132,13 +132,13 @@ class Router
     /**
      * Add a route to the routes array
      * 
-     * @param string $httpMethod HTTP method (GET, POST, PUT, DELETE)
-     * @param string $path       Route path
-     * @param string $controller Controller class name
-     * @param string $method     Controller method name
+     * @param string          $httpMethod HTTP method (GET, POST, PUT, DELETE)
+     * @param string          $path       Route path
+     * @param string|callable $controller Controller class name or closure
+     * @param string|null     $method     Controller method name (null for closures)
      * @return void
      */
-    private function addRoute(string $httpMethod, string $path, string $controller, string $method): void
+    private function addRoute(string $httpMethod, string $path, $controller, $method = null): void
     {
         // Convert route path to regex pattern
         $pattern = $this->convertToRegex($path);
@@ -205,15 +205,26 @@ class Router
     }
 
     /**
-     * Instantiate controller and call the specified method
+     * Instantiate controller and call the specified method, or execute closure
      * 
-     * @param string $controllerName Fully qualified controller class name
-     * @param string $methodName     Method name to call
+     * @param string|callable $controller Controller class name or closure
+     * @param string|null     $method     Method name to call (null for closures)
      * @return void
      */
-    private function callController(string $controllerName, string $methodName): void
+    private function callController($controller, $method = null): void
     {
         try {
+            // Check if controller is a closure
+            if (is_callable($controller)) {
+                // Execute closure with parameters
+                call_user_func_array($controller, $this->params);
+                return;
+            }
+
+            // Controller is a class name
+            $controllerName = $controller;
+            $methodName = $method;
+
             // Check if controller class exists
             if (!class_exists($controllerName)) {
                 throw new \Exception("Controller {$controllerName} not found");

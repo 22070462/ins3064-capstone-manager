@@ -318,6 +318,36 @@ abstract class Controller
     }
 
     /**
+     * Check if request method is PUT
+     * 
+     * @return bool True if PUT request, false otherwise
+     */
+    protected function isPut(): bool
+    {
+        return $_SERVER['REQUEST_METHOD'] === 'PUT';
+    }
+
+    /**
+     * Check if request method is DELETE
+     * 
+     * @return bool True if DELETE request, false otherwise
+     */
+    protected function isDelete(): bool
+    {
+        return $_SERVER['REQUEST_METHOD'] === 'DELETE';
+    }
+
+    /**
+     * Check if request method is PATCH
+     * 
+     * @return bool True if PATCH request, false otherwise
+     */
+    protected function isPatch(): bool
+    {
+        return $_SERVER['REQUEST_METHOD'] === 'PATCH';
+    }
+
+    /**
      * Get current logged-in user from session
      * 
      * @return array|null User data or null if not logged in

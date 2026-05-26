@@ -190,7 +190,7 @@ class TopicController extends Controller
     {
         try {
             // AUTHORIZATION: Require authentication
-            if (!$this->middleware->requireAuth('/login')) {
+            if (!$this->middleware->requireAuth('/login', true)) {
                 return;
             }
 
@@ -222,7 +222,7 @@ class TopicController extends Controller
     {
         try {
             // AUTHORIZATION: Require authentication
-            if (!$this->middleware->requireAuth('/login')) {
+            if (!$this->middleware->requireAuth('/login', true)) {
                 return;
             }
 
@@ -328,8 +328,8 @@ class TopicController extends Controller
     /**
      * Withdraw topic registration (POST /api/topics/withdraw)
      * 
-     * Required POST parameters:
-     * - registration_id: int
+     * Student can withdraw their Pending or Approved registration.
+     * This allows them to register for a different topic.
      * 
      * @return void
      */
@@ -347,32 +347,45 @@ class TopicController extends Controller
                 return;
             }
 
-            // Get input
-            $input = $this->getJsonInput(true) ?? $this->getPost();
+            // Get current user info
+            $currentUser = $this->middleware->getCurrentUser();
+            $studentId = $currentUser['student_id'] ?? null;
+            $userId = $currentUser['id'] ?? null;
 
-            // Validate required fields
-            if (!isset($input['registration_id'])) {
-                $this->jsonError('Missing required field: registration_id', 400);
+            if (!$studentId) {
+                $this->jsonError('Student information not found', 403);
                 return;
             }
 
-            $registrationId = filter_var($input['registration_id'], FILTER_VALIDATE_INT);
+            // Withdraw registration through repository (with transaction)
+            $result = $this->topicRepository->withdrawRegistration($studentId, $userId);
 
-            if ($registrationId === false) {
-                $this->jsonError('Invalid registration ID', 400);
-                return;
-            }
-
-            // TODO: Implement withdrawal logic in repository
-            // For now, return a placeholder response
+            // Return success response
             $this->jsonSuccess(
-                ['registration_id' => $registrationId],
-                'Withdrawal functionality will be implemented in the next phase'
+                $result['data'],
+                $result['message']
             );
 
         } catch (Exception $e) {
-            error_log("Withdrawal error: " . $e->getMessage());
-            $this->jsonError('Failed to process withdrawal', 500);
+            // Handle business rule violations and errors
+            $statusCode = (int) $e->getCode();
+
+            // Map exception codes to HTTP status codes
+            if ($statusCode === 404) {
+                $this->jsonError($e->getMessage(), 404);
+            } elseif ($statusCode === 403) {
+                $this->jsonError($e->getMessage(), 403);
+            } elseif ($statusCode === 400) {
+                $this->jsonError($e->getMessage(), 400);
+            } else {
+                // Log unexpected errors
+                error_log("Withdraw registration error: " . $e->getMessage());
+                $this->jsonError(
+                    'An error occurred while withdrawing your registration. Please try again.',
+                    500,
+                    ['error' => $e->getMessage()]
+                );
+            }
         }
     }
 
@@ -399,6 +412,505 @@ class TopicController extends Controller
         } catch (Exception $e) {
             error_log("Statistics error: " . $e->getMessage());
             $this->jsonError('Failed to retrieve statistics', 500);
+        }
+    }
+
+    /**
+     * Create a new topic (POST /api/topics/create)
+     * Lecturer only
+     * 
+     * @return void
+     */
+    public function create(): void
+    {
+        try {
+            // AUTHORIZATION: Require Lecturer role
+            if (!$this->middleware->requireLecturer(true)) {
+                return;
+            }
+
+            // Validate request method
+            if (!$this->isPost()) {
+                $this->jsonError('Invalid request method. POST required.', 405);
+                return;
+            }
+
+            // Get JSON input
+            $input = $this->getJsonInput(true);
+
+            if (!$input) {
+                $this->jsonError('Invalid JSON input', 400);
+                return;
+            }
+
+            // Validate required fields
+            $required = ['title', 'description', 'department_id'];
+            $missing = $this->validateRequired($input, $required);
+
+            if (!empty($missing)) {
+                $this->jsonError(
+                    'Missing required fields: ' . implode(', ', $missing),
+                    400,
+                    ['missing_fields' => $missing]
+                );
+                return;
+            }
+
+            // Get current user info
+            $currentUser = $this->middleware->getCurrentUser();
+            $lecturerId = $currentUser['lecturer_id'] ?? null;
+            $userId = $currentUser['id'] ?? null;
+
+            if (!$lecturerId) {
+                $this->jsonError('Lecturer information not found', 403);
+                return;
+            }
+
+            // Sanitize input
+            $data = [
+                'title'         => $this->sanitize($input['title']),
+                'description'   => $this->sanitize($input['description']),
+                'department_id' => filter_var($input['department_id'], FILTER_VALIDATE_INT),
+                'status'        => $input['status'] ?? 'Draft',
+                'max_students'  => isset($input['max_students']) ? filter_var($input['max_students'], FILTER_VALIDATE_INT) : 5,
+                'tags'          => $input['tags'] ?? []
+            ];
+
+            // Validate integers
+            if ($data['department_id'] === false || $data['max_students'] === false) {
+                $this->jsonError('Invalid numeric values', 400);
+                return;
+            }
+
+            // Validate status
+            $validStatuses = ['Draft', 'Published'];
+            if (!in_array($data['status'], $validStatuses)) {
+                $this->jsonError('Invalid status. Must be Draft or Published', 400);
+                return;
+            }
+
+            // Create topic through repository
+            $result = $this->topicRepository->createTopic($data, $lecturerId, $userId);
+
+            // Return success response
+            $this->jsonSuccess(
+                $result['data'],
+                $result['message']
+            );
+
+        } catch (Exception $e) {
+            $statusCode = (int) $e->getCode();
+
+            if ($statusCode === 404) {
+                $this->jsonError($e->getMessage(), 404);
+            } elseif ($statusCode === 400) {
+                $this->jsonError($e->getMessage(), 400);
+            } else {
+                error_log("Topic creation error: " . $e->getMessage());
+                $this->jsonError(
+                    'An error occurred while creating the topic. Please try again.',
+                    500,
+                    ['error' => $e->getMessage()]
+                );
+            }
+        }
+    }
+
+    /**
+     * Update an existing topic (PUT /api/topics/{id})
+     * Lecturer only - can only update own topics
+     * 
+     * @param int $id Topic ID
+     * @return void
+     */
+    public function update(int $id): void
+    {
+        try {
+            // AUTHORIZATION: Require Lecturer role
+            if (!$this->middleware->requireLecturer(true)) {
+                return;
+            }
+
+            // Validate request method
+            if (!$this->isPut()) {
+                $this->jsonError('Invalid request method. PUT required.', 405);
+                return;
+            }
+
+            // Validate ID
+            if ($id <= 0) {
+                $this->jsonError('Invalid topic ID', 400);
+                return;
+            }
+
+            // Get JSON input
+            $input = $this->getJsonInput(true);
+
+            if (!$input) {
+                $this->jsonError('Invalid JSON input', 400);
+                return;
+            }
+
+            // Get current user info
+            $currentUser = $this->middleware->getCurrentUser();
+            $lecturerId = $currentUser['lecturer_id'] ?? null;
+            $userId = $currentUser['id'] ?? null;
+
+            if (!$lecturerId) {
+                $this->jsonError('Lecturer information not found', 403);
+                return;
+            }
+
+            // Sanitize input
+            $data = [];
+            
+            if (isset($input['title'])) {
+                $data['title'] = $this->sanitize($input['title']);
+            }
+            
+            if (isset($input['description'])) {
+                $data['description'] = $this->sanitize($input['description']);
+            }
+            
+            if (isset($input['status'])) {
+                $validStatuses = ['Draft', 'Published'];
+                if (!in_array($input['status'], $validStatuses)) {
+                    $this->jsonError('Invalid status. Must be Draft or Published', 400);
+                    return;
+                }
+                $data['status'] = $input['status'];
+            }
+            
+            if (isset($input['max_students'])) {
+                $maxStudents = filter_var($input['max_students'], FILTER_VALIDATE_INT);
+                if ($maxStudents === false) {
+                    $this->jsonError('Invalid max_students value', 400);
+                    return;
+                }
+                $data['max_students'] = $maxStudents;
+            }
+            
+            if (isset($input['tags'])) {
+                $data['tags'] = $input['tags'];
+            }
+
+            // Update topic through repository
+            $result = $this->topicRepository->updateTopic($id, $data, $lecturerId, $userId);
+
+            // Return success response
+            $this->jsonSuccess(
+                $result['data'],
+                $result['message']
+            );
+
+        } catch (Exception $e) {
+            $statusCode = (int) $e->getCode();
+
+            if ($statusCode === 404) {
+                $this->jsonError($e->getMessage(), 404);
+            } elseif ($statusCode === 403) {
+                $this->jsonError($e->getMessage(), 403);
+            } elseif ($statusCode === 400) {
+                $this->jsonError($e->getMessage(), 400);
+            } else {
+                error_log("Topic update error: " . $e->getMessage());
+                $this->jsonError(
+                    'An error occurred while updating the topic. Please try again.',
+                    500,
+                    ['error' => $e->getMessage()]
+                );
+            }
+        }
+    }
+
+    /**
+     * Get lecturer's topics (GET /api/topics/my-topics)
+     * Lecturer only
+     * 
+     * @return void
+     */
+    public function getMyTopics(): void
+    {
+        try {
+            // AUTHORIZATION: Require Lecturer role
+            if (!$this->middleware->requireLecturer(true)) {
+                return;
+            }
+
+            // Get current user info
+            $currentUser = $this->middleware->getCurrentUser();
+            $lecturerId = $currentUser['lecturer_id'] ?? null;
+
+            if (!$lecturerId) {
+                $this->jsonError('Lecturer information not found', 403);
+                return;
+            }
+
+            // Fetch lecturer's topics
+            $topics = $this->topicRepository->getLecturerTopics($lecturerId);
+
+            $this->jsonSuccess(
+                $topics,
+                'Topics retrieved successfully'
+            );
+
+        } catch (Exception $e) {
+            error_log("Get lecturer topics error: " . $e->getMessage());
+            $this->jsonError('Failed to retrieve topics', 500);
+        }
+    }
+
+    /**
+     * Get registrations for lecturer's topics (GET /api/topics/my-registrations)
+     * Lecturer only
+     * 
+     * @return void
+     */
+    public function getMyRegistrations(): void
+    {
+        try {
+            // AUTHORIZATION: Require Lecturer role
+            if (!$this->middleware->requireLecturer(true)) {
+                return;
+            }
+
+            // Get current user info
+            $currentUser = $this->middleware->getCurrentUser();
+            $lecturerId = $currentUser['lecturer_id'] ?? null;
+
+            if (!$lecturerId) {
+                $this->jsonError('Lecturer information not found', 403);
+                return;
+            }
+
+            // Get optional status filter
+            $status = $this->getQuery('status');
+            $validStatuses = ['Pending', 'Approved', 'Rejected'];
+            
+            if ($status && !in_array($status, $validStatuses)) {
+                $this->jsonError('Invalid status filter', 400);
+                return;
+            }
+
+            // Fetch registrations
+            $registrations = $this->topicRepository->getLecturerRegistrations($lecturerId, $status);
+
+            $this->jsonSuccess(
+                $registrations,
+                'Registrations retrieved successfully'
+            );
+
+        } catch (Exception $e) {
+            error_log("Get lecturer registrations error: " . $e->getMessage());
+            $this->jsonError('Failed to retrieve registrations', 500);
+        }
+    }
+
+    /**
+     * Approve a student registration (POST /api/topics/registrations/{id}/approve)
+     * Lecturer only
+     * 
+     * @param int $id Registration ID
+     * @return void
+     */
+    public function approveRegistration(int $id): void
+    {
+        try {
+            // AUTHORIZATION: Require Lecturer role
+            if (!$this->middleware->requireLecturer(true)) {
+                return;
+            }
+
+            // Validate request method
+            if (!$this->isPost()) {
+                $this->jsonError('Invalid request method. POST required.', 405);
+                return;
+            }
+
+            // Validate ID
+            if ($id <= 0) {
+                $this->jsonError('Invalid registration ID', 400);
+                return;
+            }
+
+            // Get current user info
+            $currentUser = $this->middleware->getCurrentUser();
+            $lecturerId = $currentUser['lecturer_id'] ?? null;
+            $userId = $currentUser['id'] ?? null;
+
+            if (!$lecturerId) {
+                $this->jsonError('Lecturer information not found', 403);
+                return;
+            }
+
+            // Approve registration through repository
+            $result = $this->topicRepository->approveRegistration($id, $lecturerId, $userId);
+
+            // Return success response
+            $this->jsonSuccess(
+                $result['data'],
+                $result['message']
+            );
+
+        } catch (Exception $e) {
+            $statusCode = (int) $e->getCode();
+
+            if ($statusCode === 404) {
+                $this->jsonError($e->getMessage(), 404);
+            } elseif ($statusCode === 403) {
+                $this->jsonError($e->getMessage(), 403);
+            } elseif ($statusCode === 400) {
+                $this->jsonError($e->getMessage(), 400);
+            } else {
+                error_log("Approve registration error: " . $e->getMessage());
+                $this->jsonError(
+                    'An error occurred while approving the registration. Please try again.',
+                    500,
+                    ['error' => $e->getMessage()]
+                );
+            }
+        }
+    }
+
+    /**
+     * Reject a student registration (POST /api/topics/registrations/{id}/reject)
+     * Lecturer only
+     * 
+     * @param int $id Registration ID
+     * @return void
+     */
+    public function rejectRegistration(int $id): void
+    {
+        try {
+            // AUTHORIZATION: Require Lecturer role
+            if (!$this->middleware->requireLecturer(true)) {
+                return;
+            }
+
+            // Validate request method
+            if (!$this->isPost()) {
+                $this->jsonError('Invalid request method. POST required.', 405);
+                return;
+            }
+
+            // Validate ID
+            if ($id <= 0) {
+                $this->jsonError('Invalid registration ID', 400);
+                return;
+            }
+
+            // Get JSON input
+            $input = $this->getJsonInput(true);
+
+            if (!$input || empty($input['reason'])) {
+                $this->jsonError('Rejection reason is required', 400);
+                return;
+            }
+
+            $reason = $this->sanitize($input['reason']);
+
+            // Get current user info
+            $currentUser = $this->middleware->getCurrentUser();
+            $lecturerId = $currentUser['lecturer_id'] ?? null;
+            $userId = $currentUser['id'] ?? null;
+
+            if (!$lecturerId) {
+                $this->jsonError('Lecturer information not found', 403);
+                return;
+            }
+
+            // Reject registration through repository
+            $result = $this->topicRepository->rejectRegistration($id, $lecturerId, $reason, $userId);
+
+            // Return success response
+            $this->jsonSuccess(
+                $result['data'],
+                $result['message']
+            );
+
+        } catch (Exception $e) {
+            $statusCode = (int) $e->getCode();
+
+            if ($statusCode === 404) {
+                $this->jsonError($e->getMessage(), 404);
+            } elseif ($statusCode === 403) {
+                $this->jsonError($e->getMessage(), 403);
+            } elseif ($statusCode === 400) {
+                $this->jsonError($e->getMessage(), 400);
+            } else {
+                error_log("Reject registration error: " . $e->getMessage());
+                $this->jsonError(
+                    'An error occurred while rejecting the registration. Please try again.',
+                    500,
+                    ['error' => $e->getMessage()]
+                );
+            }
+        }
+    }
+
+    /**
+     * Delete a topic (DELETE /api/topics/{id})
+     * Lecturer only - can only delete own topics
+     * 
+     * @param int $id Topic ID
+     * @return void
+     */
+    public function delete(int $id): void
+    {
+        try {
+            // AUTHORIZATION: Require Lecturer role
+            if (!$this->middleware->requireLecturer(true)) {
+                return;
+            }
+
+            // Validate request method
+            if (!$this->isDelete()) {
+                $this->jsonError('Invalid request method. DELETE required.', 405);
+                return;
+            }
+
+            // Validate ID
+            if ($id <= 0) {
+                $this->jsonError('Invalid topic ID', 400);
+                return;
+            }
+
+            // Get current user info
+            $currentUser = $this->middleware->getCurrentUser();
+            $lecturerId = $currentUser['lecturer_id'] ?? null;
+            $userId = $currentUser['id'] ?? null;
+
+            if (!$lecturerId) {
+                $this->jsonError('Lecturer information not found', 403);
+                return;
+            }
+
+            // Delete topic through repository
+            $result = $this->topicRepository->deleteTopic($id, $lecturerId, $userId);
+
+            // Return success response
+            $this->jsonSuccess(
+                $result['data'],
+                $result['message']
+            );
+
+        } catch (Exception $e) {
+            $statusCode = (int) $e->getCode();
+
+            if ($statusCode === 404) {
+                $this->jsonError($e->getMessage(), 404);
+            } elseif ($statusCode === 403) {
+                $this->jsonError($e->getMessage(), 403);
+            } elseif ($statusCode === 400) {
+                $this->jsonError($e->getMessage(), 400);
+            } else {
+                error_log("Topic deletion error: " . $e->getMessage());
+                $this->jsonError(
+                    'An error occurred while deleting the topic. Please try again.',
+                    500,
+                    ['error' => $e->getMessage()]
+                );
+            }
         }
     }
 }

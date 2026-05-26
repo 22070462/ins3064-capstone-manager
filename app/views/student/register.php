@@ -510,8 +510,16 @@
                     }
                 } else {
                     // Error from API
-                    showAlert(result.message || 'Registration failed', 'danger');
-                    showToast('Error', result.message || 'Registration failed', 'danger');
+                    const errorMessage = result.message || 'Registration failed';
+                    showAlert(errorMessage, 'danger');
+                    showToast('Error', errorMessage, 'danger');
+                    
+                    // If authentication error, redirect to login
+                    if (response.status === 401 || response.status === 403) {
+                        setTimeout(() => {
+                            window.location.href = '/capstone_project/login';
+                        }, 2000);
+                    }
                 }
 
             } catch (error) {

@@ -577,31 +577,55 @@
          * Load dashboard data
          */
         async function loadDashboardData() {
-            if (!currentStudentId) {
-                console.error('Student ID not available');
-                return;
-            }
-
+            console.log('=== Student loadDashboardData START ===');
+            console.log('Current student ID:', currentStudentId);
+            
             showLoading(true);
             
             try {
+                // Ensure student ID is loaded
+                if (!currentStudentId) {
+                    console.warn('Student ID not available, waiting for user info...');
+                    await loadCurrentUser();
+                }
+
+                // Check again after loading
+                if (!currentStudentId) {
+                    console.error('Student ID still not available after loading user info');
+                    showAlert('Unable to load student information. Please refresh the page.', 'danger');
+                    showLoading(false);
+                    return;
+                }
+
+                console.log('Loading data for student ID:', currentStudentId);
+
                 // Load available topics
+                console.log('Fetching available topics...');
                 await loadAvailableTopics();
+                console.log('Available topics loaded:', availableTopics.length);
                 
                 // Load student's registrations
+                console.log('Fetching student registrations...');
                 await loadStudentRegistrations();
+                console.log('Student registrations loaded:', studentRegistrations.length);
                 
                 // Update stats
+                console.log('Updating statistics...');
                 updateStatistics();
                 
                 // Render registrations list
+                console.log('Rendering registrations list...');
                 renderRegistrationsList();
 
+                console.log('=== Student loadDashboardData SUCCESS ===');
+
             } catch (error) {
+                console.error('=== Student loadDashboardData ERROR ===');
                 console.error('Dashboard error:', error);
-                showAlert('Failed to load dashboard data', 'danger');
+                showAlert('Failed to load dashboard data: ' + error.message, 'danger');
             } finally {
                 showLoading(false);
+                console.log('=== Student loadDashboardData END ===');
             }
         }
 
@@ -610,22 +634,26 @@
          */
         async function loadAvailableTopics() {
             try {
+                console.log('Calling API:', `${API_BASE_URL}/topics`);
                 const response = await fetch(`${API_BASE_URL}/topics`, {
                     method: 'GET',
                     headers: { 'Accept': 'application/json' },
                     credentials: 'same-origin'
                 });
 
+                console.log('Topics API response status:', response.status);
+
                 if (response.ok) {
                     const result = await response.json();
                     availableTopics = result.data || [];
-                    console.log('Available topics loaded:', availableTopics.length);
+                    console.log('✓ Available topics loaded:', availableTopics.length);
                 } else {
-                    console.error('Failed to load topics:', response.status);
+                    const errorText = await response.text();
+                    console.error('✗ Failed to load topics:', response.status, errorText);
                     availableTopics = [];
                 }
             } catch (error) {
-                console.error('Load topics error:', error);
+                console.error('✗ Load topics error:', error);
                 availableTopics = [];
             }
         }
@@ -635,22 +663,28 @@
          */
         async function loadStudentRegistrations() {
             try {
-                const response = await fetch(`${API_BASE_URL}/topics/registrations/${currentStudentId}`, {
+                const url = `${API_BASE_URL}/topics/registrations/${currentStudentId}`;
+                console.log('Calling API:', url);
+                
+                const response = await fetch(url, {
                     method: 'GET',
                     headers: { 'Accept': 'application/json' },
                     credentials: 'same-origin'
                 });
 
+                console.log('Registrations API response status:', response.status);
+
                 if (response.ok) {
                     const result = await response.json();
                     studentRegistrations = result.data || [];
-                    console.log('Student registrations loaded:', studentRegistrations.length);
+                    console.log('✓ Student registrations loaded:', studentRegistrations.length);
                 } else {
-                    console.error('Failed to load registrations:', response.status);
+                    const errorText = await response.text();
+                    console.error('✗ Failed to load registrations:', response.status, errorText);
                     studentRegistrations = [];
                 }
             } catch (error) {
-                console.error('Load registrations error:', error);
+                console.error('✗ Load registrations error:', error);
                 studentRegistrations = [];
             }
         }
@@ -659,18 +693,46 @@
          * Update statistics cards
          */
         function updateStatistics() {
+            console.log('Updating statistics...');
+            
             // Available topics count
-            document.getElementById('availableTopicsCount').textContent = availableTopics.length;
+            const availableTopicsCountEl = document.getElementById('availableTopicsCount');
+            if (availableTopicsCountEl) {
+                availableTopicsCountEl.textContent = availableTopics.length;
+                console.log('✓ Set availableTopicsCount to:', availableTopics.length);
+            } else {
+                console.error('✗ Element availableTopicsCount not found!');
+            }
             
             // My registrations count
-            document.getElementById('myRegistrationsCount').textContent = studentRegistrations.length;
+            const myRegistrationsCountEl = document.getElementById('myRegistrationsCount');
+            if (myRegistrationsCountEl) {
+                myRegistrationsCountEl.textContent = studentRegistrations.length;
+                console.log('✓ Set myRegistrationsCount to:', studentRegistrations.length);
+            } else {
+                console.error('✗ Element myRegistrationsCount not found!');
+            }
             
             // Pending count
             const pendingCount = studentRegistrations.filter(r => r.status === 'Pending').length;
-            document.getElementById('pendingCount').textContent = pendingCount;
+            const pendingCountEl = document.getElementById('pendingCount');
+            if (pendingCountEl) {
+                pendingCountEl.textContent = pendingCount;
+                console.log('✓ Set pendingCount to:', pendingCount);
+            } else {
+                console.error('✗ Element pendingCount not found!');
+            }
             
             // Submissions count (placeholder)
-            document.getElementById('submissionsCount').textContent = '0';
+            const submissionsCountEl = document.getElementById('submissionsCount');
+            if (submissionsCountEl) {
+                submissionsCountEl.textContent = '0';
+                console.log('✓ Set submissionsCount to: 0');
+            } else {
+                console.error('✗ Element submissionsCount not found!');
+            }
+            
+            console.log('Statistics updated successfully');
         }
 
         /**
@@ -696,6 +758,9 @@
                 const statusBadge = getStatusBadge(reg.status);
                 const statusIcon = getStatusIcon(reg.status);
                 
+                // Show withdraw button only for Pending or Approved registrations
+                const canWithdraw = reg.status === 'Pending' || reg.status === 'Approved';
+                
                 return `
                     <div class="topic-item">
                         <div class="d-flex justify-content-between align-items-start">
@@ -718,6 +783,13 @@
                                 <div class="topic-description mt-2">
                                     ${escapeHtml(truncateText(reg.topic_description || 'No description available', 150))}
                                 </div>
+                                ${canWithdraw ? `
+                                <div class="mt-2">
+                                    <button class="btn btn-danger btn-sm" onclick="withdrawRegistration()">
+                                        <i class="bi bi-x-circle"></i> Withdraw
+                                    </button>
+                                </div>
+                                ` : ''}
                             </div>
                         </div>
                     </div>
@@ -949,6 +1021,81 @@
         }
 
         /**
+         * Withdraw/Cancel registration
+         */
+        async function withdrawRegistration() {
+            if (!currentStudentId) {
+                showAlert('Student information not available', 'danger');
+                return;
+            }
+
+            // Confirm withdrawal with detailed message
+            const confirmMessage = 'Are you sure you want to withdraw your registration?\n\n' +
+                                 'This action will:\n' +
+                                 '• Cancel your current registration\n' +
+                                 '• Allow you to register for other topics\n' +
+                                 '• Cannot be undone\n\n' +
+                                 'Do you want to proceed?';
+            
+            if (!confirm(confirmMessage)) {
+                return;
+            }
+
+            showLoading(true);
+
+            try {
+                const response = await fetch(`${API_BASE_URL}/topics/withdraw`, {
+                    method: 'POST',
+                    headers: {
+                        'Accept': 'application/json',
+                        'Content-Type': 'application/json'
+                    },
+                    credentials: 'same-origin'
+                });
+
+                const result = await response.json();
+
+                if (response.ok && result.success) {
+                    // Show success toast
+                    showToast(
+                        'Registration Withdrawn!', 
+                        result.message || 'You can now register for other topics.', 
+                        'success'
+                    );
+                    
+                    // Reload data
+                    await loadStudentRegistrations();
+                    await loadAvailableTopics();
+                    
+                    // Update statistics
+                    updateStatistics();
+                    
+                    // Check current view and refresh accordingly
+                    const currentView = document.querySelector('.content-area').innerHTML;
+                    
+                    if (currentView.includes('My Registrations')) {
+                        // Refresh My Registrations view
+                        await showMyRegistrationsSection();
+                    } else if (currentView.includes('Available Topics')) {
+                        // Refresh Browse Topics view
+                        await showBrowseTopicsSection();
+                    } else {
+                        // Reload dashboard
+                        location.reload();
+                    }
+                } else {
+                    showAlert(result.message || 'Failed to withdraw registration', 'danger');
+                }
+
+            } catch (error) {
+                console.error('Withdrawal error:', error);
+                showAlert('Network error. Please try again.', 'danger');
+            } finally {
+                showLoading(false);
+            }
+        }
+
+        /**
          * Show My Registrations section
          */
         async function showMyRegistrationsSection() {
@@ -1048,6 +1195,9 @@
                 const statusBadge = getStatusBadge(reg.status);
                 const statusIcon = getStatusIcon(reg.status);
                 
+                // Show withdraw button only for Pending or Approved registrations
+                const canWithdraw = reg.status === 'Pending' || reg.status === 'Approved';
+                
                 return `
                     <div class="card mb-3">
                         <div class="card-body">
@@ -1081,6 +1231,16 @@
                                         </div>
                                         ` : ''}
                                     </div>
+                                    ${canWithdraw ? `
+                                    <div class="mt-3">
+                                        <button class="btn btn-danger btn-sm" onclick="withdrawRegistration()">
+                                            <i class="bi bi-x-circle"></i> Withdraw Registration
+                                        </button>
+                                        <small class="text-muted ms-2">
+                                            <i class="bi bi-info-circle"></i> You can register for another topic after withdrawing
+                                        </small>
+                                    </div>
+                                    ` : ''}
                                 </div>
                                 <div class="ms-3">
                                     <span class="badge ${statusBadge} fs-6">
