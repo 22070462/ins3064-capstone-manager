@@ -419,7 +419,7 @@
                             <i class="bi bi-search text-primary" style="font-size: 48px;"></i>
                             <h5 class="mt-3">Browse Topics</h5>
                             <p class="text-muted">Explore available capstone project topics</p>
-                            <button class="btn btn-primary" onclick="browseTopic()">Browse Now</button>
+                            <button class="btn btn-primary" onclick="showBrowseTopicsSection()">Browse Now</button>
                         </div>
                     </div>
                 </div>
@@ -429,7 +429,7 @@
                             <i class="bi bi-clipboard-check text-success" style="font-size: 48px;"></i>
                             <h5 class="mt-3">My Registrations</h5>
                             <p class="text-muted">View your topic registration status</p>
-                            <button class="btn btn-success" onclick="viewRegistrations()">View Status</button>
+                            <button class="btn btn-success" onclick="showMyRegistrationsSection()">View Status</button>
                         </div>
                     </div>
                 </div>
@@ -471,179 +471,477 @@
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
 
     <script>
-        // Configuration - FIXED: Removed /public/ from path
+        // Configuration
         const API_BASE_URL = '/capstone_project/api';
+        
+        // Global state
+        let currentStudentId = null;
+        let currentUserId = null;
+        let studentRegistrations = [];
+        let availableTopics = [];
 
         // Initialize on page load
         document.addEventListener('DOMContentLoaded', function() {
-            loadDashboardData();
+            initializeApp();
+        });
+
+        /**
+         * Initialize application
+         */
+        async function initializeApp() {
+            // Load current user info first
+            await loadCurrentUser();
+            
+            // Load dashboard data
+            await loadDashboardData();
+            
+            // Update clock
             updateClock();
             setInterval(updateClock, 1000);
             
+            // Setup navigation
+            setupNavigation();
+            
             // Logout button
             document.getElementById('logoutBtn').addEventListener('click', handleLogout);
-        });
+        }
+
+        /**
+         * Load current user information
+         */
+        async function loadCurrentUser() {
+            try {
+                const response = await fetch(`${API_BASE_URL}/auth/me`, {
+                    method: 'GET',
+                    headers: { 'Accept': 'application/json' },
+                    credentials: 'same-origin'
+                });
+
+                if (response.ok) {
+                    const result = await response.json();
+                    currentStudentId = result.data?.student_id;
+                    currentUserId = result.data?.id;
+                    
+                    // Update student name in sidebar
+                    const studentName = result.data?.name || 'Student';
+                    document.getElementById('studentName').textContent = studentName;
+                    
+                    // Update avatar
+                    const avatar = studentName.charAt(0).toUpperCase();
+                    document.getElementById('userAvatar').textContent = avatar;
+                    
+                    console.log('Student ID loaded:', currentStudentId);
+                    
+                    if (!currentStudentId) {
+                        showAlert('Student information not found. Please contact administrator.', 'danger');
+                    }
+                } else {
+                    console.error('Failed to load user info:', response.status);
+                    showAlert('Failed to load user information', 'danger');
+                }
+            } catch (error) {
+                console.error('Load user error:', error);
+                showAlert('Network error while loading user information', 'danger');
+            }
+        }
+
+        /**
+         * Setup navigation
+         */
+        function setupNavigation() {
+            const menuLinks = document.querySelectorAll('.sidebar-menu a');
+            menuLinks.forEach(link => {
+                link.addEventListener('click', function(e) {
+                    e.preventDefault();
+                    const page = this.getAttribute('data-page');
+                    
+                    // Update active menu
+                    menuLinks.forEach(l => l.classList.remove('active'));
+                    this.classList.add('active');
+                    
+                    // Handle navigation
+                    if (page === 'browse-topics') {
+                        showBrowseTopicsSection();
+                    } else if (page === 'my-registrations') {
+                        showMyRegistrationsSection();
+                    } else if (page === 'dashboard') {
+                        location.reload(); // Reload dashboard
+                    } else {
+                        showAlert(`${page} feature coming soon!`, 'info');
+                    }
+                });
+            });
+        }
 
         /**
          * Load dashboard data
          */
         async function loadDashboardData() {
+            if (!currentStudentId) {
+                console.error('Student ID not available');
+                return;
+            }
+
             showLoading(true);
             
             try {
-                // Get current user info first
-                const userResponse = await fetch(`${API_BASE_URL}/auth/me`, {
-                    method: 'GET',
-                    headers: {
-                        'Accept': 'application/json'
-                    },
-                    credentials: 'same-origin'
-                });
-
-                if (!userResponse.ok) {
-                    throw new Error('Failed to get user info');
-                }
-
-                const userResult = await userResponse.json();
-                const studentId = userResult.data?.student_id;
-
-                if (!studentId) {
-                    showAlert('Student information not found', 'danger');
-                    return;
-                }
-
                 // Load available topics
-                const topicsResponse = await fetch(`${API_BASE_URL}/topics`, {
-                    method: 'GET',
-                    headers: {
-                        'Accept': 'application/json'
-                    },
-                    credentials: 'same-origin'
-                });
-
-                if (topicsResponse.ok) {
-                    const topicsResult = await topicsResponse.json();
-                    const topics = topicsResult.data || [];
-                    document.getElementById('availableTopicsCount').textContent = topics.length;
-                }
-
+                await loadAvailableTopics();
+                
                 // Load student's registrations
-                const registrationsResponse = await fetch(`${API_BASE_URL}/topics/registrations/${studentId}`, {
-                    method: 'GET',
-                    headers: {
-                        'Accept': 'application/json'
-                    },
-                    credentials: 'same-origin'
-                });
-
-                if (registrationsResponse.ok) {
-                    const registrationsResult = await registrationsResponse.json();
-                    const registrations = registrationsResult.data || [];
-                    
-                    // Update counts
-                    document.getElementById('myRegistrationsCount').textContent = registrations.length;
-                    
-                    const pendingCount = registrations.filter(r => r.status === 'Pending').length;
-                    document.getElementById('pendingCount').textContent = pendingCount;
-                    
-                    // Render registrations list
-                    renderRegistrations(registrations);
-                } else {
-                    // Show empty state if no registrations
-                    document.getElementById('myRegistrationsCount').textContent = '0';
-                    document.getElementById('pendingCount').textContent = '0';
-                }
-
-                // Submissions count (placeholder for now)
-                document.getElementById('submissionsCount').textContent = '0';
+                await loadStudentRegistrations();
+                
+                // Update stats
+                updateStatistics();
+                
+                // Render registrations list
+                renderRegistrationsList();
 
             } catch (error) {
                 console.error('Dashboard error:', error);
                 showAlert('Failed to load dashboard data', 'danger');
-                
-                // Show default values on error
-                document.getElementById('availableTopicsCount').textContent = '0';
-                document.getElementById('myRegistrationsCount').textContent = '0';
-                document.getElementById('pendingCount').textContent = '0';
-                document.getElementById('submissionsCount').textContent = '0';
             } finally {
                 showLoading(false);
             }
         }
 
         /**
-         * Render registrations list
+         * Load available topics from API
          */
-        function renderRegistrations(registrations) {
+        async function loadAvailableTopics() {
+            try {
+                const response = await fetch(`${API_BASE_URL}/topics`, {
+                    method: 'GET',
+                    headers: { 'Accept': 'application/json' },
+                    credentials: 'same-origin'
+                });
+
+                if (response.ok) {
+                    const result = await response.json();
+                    availableTopics = result.data || [];
+                    console.log('Available topics loaded:', availableTopics.length);
+                } else {
+                    console.error('Failed to load topics:', response.status);
+                    availableTopics = [];
+                }
+            } catch (error) {
+                console.error('Load topics error:', error);
+                availableTopics = [];
+            }
+        }
+
+        /**
+         * Load student's registrations from API
+         */
+        async function loadStudentRegistrations() {
+            try {
+                const response = await fetch(`${API_BASE_URL}/topics/registrations/${currentStudentId}`, {
+                    method: 'GET',
+                    headers: { 'Accept': 'application/json' },
+                    credentials: 'same-origin'
+                });
+
+                if (response.ok) {
+                    const result = await response.json();
+                    studentRegistrations = result.data || [];
+                    console.log('Student registrations loaded:', studentRegistrations.length);
+                } else {
+                    console.error('Failed to load registrations:', response.status);
+                    studentRegistrations = [];
+                }
+            } catch (error) {
+                console.error('Load registrations error:', error);
+                studentRegistrations = [];
+            }
+        }
+
+        /**
+         * Update statistics cards
+         */
+        function updateStatistics() {
+            // Available topics count
+            document.getElementById('availableTopicsCount').textContent = availableTopics.length;
+            
+            // My registrations count
+            document.getElementById('myRegistrationsCount').textContent = studentRegistrations.length;
+            
+            // Pending count
+            const pendingCount = studentRegistrations.filter(r => r.status === 'Pending').length;
+            document.getElementById('pendingCount').textContent = pendingCount;
+            
+            // Submissions count (placeholder)
+            document.getElementById('submissionsCount').textContent = '0';
+        }
+
+        /**
+         * Render registrations list on dashboard
+         */
+        function renderRegistrationsList() {
             const registrationsList = document.getElementById('registrationsList');
             
-            if (!registrations || registrations.length === 0) {
+            if (!studentRegistrations || studentRegistrations.length === 0) {
                 registrationsList.innerHTML = `
                     <div class="text-center text-muted py-4">
                         <i class="bi bi-inbox" style="font-size: 48px;"></i>
                         <p class="mt-2">No registrations yet. Browse topics to get started!</p>
+                        <button class="btn btn-primary mt-2" onclick="showBrowseTopicsSection()">
+                            <i class="bi bi-search"></i> Browse Topics
+                        </button>
                     </div>
                 `;
                 return;
             }
 
-            registrationsList.innerHTML = registrations.map(reg => {
-                const statusBadge = reg.status === 'Approved' ? 'bg-success' : 
-                                   reg.status === 'Pending' ? 'bg-warning' : 'bg-danger';
+            registrationsList.innerHTML = studentRegistrations.map(reg => {
+                const statusBadge = getStatusBadge(reg.status);
+                const statusIcon = getStatusIcon(reg.status);
                 
-                const actionButton = reg.status === 'Pending' ? 
-                    `<button class="btn btn-sm btn-outline-danger" onclick="withdrawRegistration(${reg.id})">Withdraw</button>` :
-                    `<button class="btn btn-sm btn-primary" onclick="viewTopicDetails(${reg.topic_id})">View Details</button>`;
-
                 return `
                     <div class="topic-item">
-                        <div class="topic-title">${escapeHtml(reg.topic_title || 'Untitled Topic')}</div>
-                        <div class="topic-meta">
-                            <span class="badge ${statusBadge}">${reg.status}</span>
-                            <span class="ms-2"><i class="bi bi-person"></i> ${escapeHtml(reg.lecturer_name || 'Unknown')}</span>
-                            <span class="ms-2"><i class="bi bi-calendar"></i> Registered: ${formatDate(reg.registered_at)}</span>
+                        <div class="d-flex justify-content-between align-items-start">
+                            <div class="flex-grow-1">
+                                <div class="topic-title">
+                                    <i class="bi bi-journal-text text-primary"></i>
+                                    ${escapeHtml(reg.topic_title || 'Untitled Topic')}
+                                </div>
+                                <div class="topic-meta">
+                                    <span class="badge ${statusBadge}">
+                                        <i class="bi ${statusIcon}"></i> ${reg.status}
+                                    </span>
+                                    <span class="ms-2">
+                                        <i class="bi bi-person"></i> ${escapeHtml(reg.lecturer_name || 'Unknown')}
+                                    </span>
+                                    <span class="ms-2">
+                                        <i class="bi bi-calendar"></i> ${formatDate(reg.registered_at)}
+                                    </span>
+                                </div>
+                                <div class="topic-description mt-2">
+                                    ${escapeHtml(truncateText(reg.topic_description || 'No description available', 150))}
+                                </div>
+                            </div>
                         </div>
-                        <div class="topic-description">
-                            ${escapeHtml(reg.topic_description || 'No description available')}
-                        </div>
-                        ${actionButton}
                     </div>
                 `;
             }).join('');
         }
 
         /**
-         * Withdraw registration
+         * Show Browse Topics section
          */
-        async function withdrawRegistration(registrationId) {
-            if (!confirm('Are you sure you want to withdraw this registration?')) {
+        async function showBrowseTopicsSection() {
+            showLoading(true);
+            
+            try {
+                // Reload topics to get latest data
+                await loadAvailableTopics();
+                await loadStudentRegistrations();
+                
+                // Check if student has pending or approved registration
+                const hasActiveRegistration = studentRegistrations.some(
+                    r => r.status === 'Pending' || r.status === 'Approved'
+                );
+                
+                // Scroll to top
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+                
+                // Replace content area with browse topics view
+                const contentArea = document.querySelector('.content-area');
+                contentArea.innerHTML = `
+                    <!-- Alert Container -->
+                    <div id="alertContainer"></div>
+                    
+                    <!-- Back Button -->
+                    <div class="mb-3">
+                        <button class="btn btn-outline-secondary" onclick="location.reload()">
+                            <i class="bi bi-arrow-left"></i> Back to Dashboard
+                        </button>
+                    </div>
+                    
+                    ${hasActiveRegistration ? `
+                    <div class="alert alert-warning">
+                        <i class="bi bi-exclamation-triangle-fill"></i>
+                        <strong>Note:</strong> You already have a ${studentRegistrations.find(r => r.status === 'Pending' || r.status === 'Approved').status.toLowerCase()} registration. 
+                        You cannot register for additional topics until your current registration is resolved.
+                    </div>
+                    ` : ''}
+                    
+                    <!-- Available Topics Section -->
+                    <div class="section-card">
+                        <div class="d-flex justify-content-between align-items-center mb-3">
+                            <h5 class="mb-0">
+                                <i class="bi bi-journal-text"></i> Available Topics
+                                <span class="badge bg-primary">${availableTopics.length}</span>
+                            </h5>
+                            <div>
+                                <input type="text" class="form-control form-control-sm" id="searchTopics" 
+                                       placeholder="Search topics..." style="width: 250px;">
+                            </div>
+                        </div>
+                        
+                        <div id="topicsContainer">
+                            ${renderTopicsGrid(hasActiveRegistration)}
+                        </div>
+                    </div>
+                `;
+                
+                // Setup search functionality
+                document.getElementById('searchTopics')?.addEventListener('input', function(e) {
+                    const searchTerm = e.target.value.toLowerCase();
+                    const filteredTopics = availableTopics.filter(topic => 
+                        topic.title.toLowerCase().includes(searchTerm) ||
+                        topic.description.toLowerCase().includes(searchTerm) ||
+                        (topic.lecturer_name && topic.lecturer_name.toLowerCase().includes(searchTerm))
+                    );
+                    
+                    const container = document.getElementById('topicsContainer');
+                    container.innerHTML = renderTopicsGridFiltered(filteredTopics, hasActiveRegistration);
+                });
+                
+            } catch (error) {
+                console.error('Browse topics error:', error);
+                showAlert('Failed to load topics', 'danger');
+            } finally {
+                showLoading(false);
+            }
+        }
+
+        /**
+         * Render topics grid
+         */
+        function renderTopicsGrid(disableRegistration = false) {
+            if (!availableTopics || availableTopics.length === 0) {
+                return `
+                    <div class="text-center text-muted py-5">
+                        <i class="bi bi-inbox" style="font-size: 64px;"></i>
+                        <p class="mt-3">No topics available at the moment</p>
+                        <p class="text-muted">Please check back later</p>
+                    </div>
+                `;
+            }
+
+            return renderTopicsGridFiltered(availableTopics, disableRegistration);
+        }
+
+        /**
+         * Render filtered topics grid
+         */
+        function renderTopicsGridFiltered(topics, disableRegistration = false) {
+            if (!topics || topics.length === 0) {
+                return `
+                    <div class="text-center text-muted py-5">
+                        <i class="bi bi-search" style="font-size: 64px;"></i>
+                        <p class="mt-3">No topics found matching your search</p>
+                    </div>
+                `;
+            }
+
+            return `
+                <div class="row">
+                    ${topics.map(topic => {
+                        // Check if student already registered for this topic
+                        const alreadyRegistered = studentRegistrations.some(r => r.topic_id === topic.id);
+                        const isDisabled = disableRegistration || alreadyRegistered;
+                        
+                        let buttonHtml = '';
+                        if (alreadyRegistered) {
+                            const registration = studentRegistrations.find(r => r.topic_id === topic.id);
+                            const statusBadge = getStatusBadge(registration.status);
+                            buttonHtml = `
+                                <span class="badge ${statusBadge}">
+                                    <i class="bi ${getStatusIcon(registration.status)}"></i> 
+                                    ${registration.status}
+                                </span>
+                            `;
+                        } else if (disableRegistration) {
+                            buttonHtml = `
+                                <button class="btn btn-secondary btn-sm" disabled>
+                                    <i class="bi bi-lock"></i> Registration Locked
+                                </button>
+                            `;
+                        } else {
+                            buttonHtml = `
+                                <button class="btn btn-primary btn-sm" onclick="registerForTopic(${topic.id}, ${topic.lecturer_id})">
+                                    <i class="bi bi-check-circle"></i> Register
+                                </button>
+                            `;
+                        }
+                        
+                        return `
+                            <div class="col-md-6 col-lg-4 mb-3">
+                                <div class="card h-100">
+                                    <div class="card-body">
+                                        <h6 class="card-title text-primary">
+                                            <i class="bi bi-journal-text"></i>
+                                            ${escapeHtml(topic.title)}
+                                        </h6>
+                                        <p class="card-text small text-muted mb-2">
+                                            <i class="bi bi-person"></i> ${escapeHtml(topic.lecturer_name || 'Unknown')}
+                                        </p>
+                                        <p class="card-text small">
+                                            ${escapeHtml(truncateText(topic.description, 100))}
+                                        </p>
+                                        <div class="d-flex justify-content-between align-items-center mt-3">
+                                            <small class="text-muted">
+                                                <i class="bi bi-people"></i> 
+                                                ${topic.current_students || 0}/${topic.max_students || 5} students
+                                            </small>
+                                            ${buttonHtml}
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        `;
+                    }).join('')}
+                </div>
+            `;
+        }
+
+        /**
+         * Register for a topic
+         */
+        async function registerForTopic(topicId, lecturerId) {
+            if (!currentStudentId) {
+                showAlert('Student information not available', 'danger');
+                return;
+            }
+
+            // Confirm registration
+            if (!confirm('Are you sure you want to register for this topic?')) {
                 return;
             }
 
             showLoading(true);
 
             try {
-                const response = await fetch(`${API_BASE_URL}/topics/withdraw`, {
+                const response = await fetch(`${API_BASE_URL}/topics/register`, {
                     method: 'POST',
                     headers: {
                         'Accept': 'application/json',
                         'Content-Type': 'application/json'
                     },
                     credentials: 'same-origin',
-                    body: JSON.stringify({ registration_id: registrationId })
+                    body: JSON.stringify({
+                        student_id: currentStudentId,
+                        topic_id: topicId,
+                        lecturer_id: lecturerId
+                    })
                 });
 
                 const result = await response.json();
 
                 if (response.ok && result.success) {
-                    showAlert('Registration withdrawn successfully', 'success');
-                    loadDashboardData(); // Reload data
+                    // Show success toast
+                    showToast('Registration Successful!', 'Your registration has been submitted and is pending approval.', 'success');
+                    
+                    // Reload data and refresh view
+                    await loadStudentRegistrations();
+                    await showBrowseTopicsSection();
                 } else {
-                    showAlert(result.message || 'Failed to withdraw registration', 'danger');
+                    showAlert(result.message || 'Failed to register for topic', 'danger');
                 }
 
             } catch (error) {
-                console.error('Withdraw error:', error);
+                console.error('Registration error:', error);
                 showAlert('Network error. Please try again.', 'danger');
             } finally {
                 showLoading(false);
@@ -651,10 +949,182 @@
         }
 
         /**
-         * View topic details
+         * Show My Registrations section
          */
-        function viewTopicDetails(topicId) {
-            showAlert('Topic details feature coming soon!', 'info');
+        async function showMyRegistrationsSection() {
+            showLoading(true);
+            
+            try {
+                // Reload registrations
+                await loadStudentRegistrations();
+                
+                // Scroll to top
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+                
+                // Replace content area with registrations view
+                const contentArea = document.querySelector('.content-area');
+                contentArea.innerHTML = `
+                    <!-- Alert Container -->
+                    <div id="alertContainer"></div>
+                    
+                    <!-- Back Button -->
+                    <div class="mb-3">
+                        <button class="btn btn-outline-secondary" onclick="location.reload()">
+                            <i class="bi bi-arrow-left"></i> Back to Dashboard
+                        </button>
+                    </div>
+                    
+                    <!-- My Registrations Section -->
+                    <div class="section-card">
+                        <h5 class="mb-3">
+                            <i class="bi bi-clipboard-check"></i> My Registrations
+                            <span class="badge bg-primary">${studentRegistrations.length}</span>
+                        </h5>
+                        
+                        <!-- Filter Tabs -->
+                        <ul class="nav nav-tabs mb-3" role="tablist">
+                            <li class="nav-item" role="presentation">
+                                <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#all-registrations" type="button">
+                                    All (${studentRegistrations.length})
+                                </button>
+                            </li>
+                            <li class="nav-item" role="presentation">
+                                <button class="nav-link" data-bs-toggle="tab" data-bs-target="#pending-registrations" type="button">
+                                    Pending (${studentRegistrations.filter(r => r.status === 'Pending').length})
+                                </button>
+                            </li>
+                            <li class="nav-item" role="presentation">
+                                <button class="nav-link" data-bs-toggle="tab" data-bs-target="#approved-registrations" type="button">
+                                    Approved (${studentRegistrations.filter(r => r.status === 'Approved').length})
+                                </button>
+                            </li>
+                            <li class="nav-item" role="presentation">
+                                <button class="nav-link" data-bs-toggle="tab" data-bs-target="#rejected-registrations" type="button">
+                                    Rejected (${studentRegistrations.filter(r => r.status === 'Rejected').length})
+                                </button>
+                            </li>
+                        </ul>
+                        
+                        <!-- Tab Content -->
+                        <div class="tab-content">
+                            <div class="tab-pane fade show active" id="all-registrations">
+                                ${renderRegistrationsDetailed(studentRegistrations)}
+                            </div>
+                            <div class="tab-pane fade" id="pending-registrations">
+                                ${renderRegistrationsDetailed(studentRegistrations.filter(r => r.status === 'Pending'))}
+                            </div>
+                            <div class="tab-pane fade" id="approved-registrations">
+                                ${renderRegistrationsDetailed(studentRegistrations.filter(r => r.status === 'Approved'))}
+                            </div>
+                            <div class="tab-pane fade" id="rejected-registrations">
+                                ${renderRegistrationsDetailed(studentRegistrations.filter(r => r.status === 'Rejected'))}
+                            </div>
+                        </div>
+                    </div>
+                `;
+                
+            } catch (error) {
+                console.error('My registrations error:', error);
+                showAlert('Failed to load registrations', 'danger');
+            } finally {
+                showLoading(false);
+            }
+        }
+
+        /**
+         * Render detailed registrations list
+         */
+        function renderRegistrationsDetailed(registrations) {
+            if (!registrations || registrations.length === 0) {
+                return `
+                    <div class="text-center text-muted py-5">
+                        <i class="bi bi-inbox" style="font-size: 64px;"></i>
+                        <p class="mt-3">No registrations found</p>
+                    </div>
+                `;
+            }
+
+            return registrations.map(reg => {
+                const statusBadge = getStatusBadge(reg.status);
+                const statusIcon = getStatusIcon(reg.status);
+                
+                return `
+                    <div class="card mb-3">
+                        <div class="card-body">
+                            <div class="d-flex justify-content-between align-items-start">
+                                <div class="flex-grow-1">
+                                    <h6 class="card-title text-primary">
+                                        <i class="bi bi-journal-text"></i>
+                                        ${escapeHtml(reg.topic_title || 'Untitled Topic')}
+                                    </h6>
+                                    <p class="card-text mb-2">
+                                        ${escapeHtml(reg.topic_description || 'No description available')}
+                                    </p>
+                                    <div class="small text-muted">
+                                        <div class="mb-1">
+                                            <i class="bi bi-person"></i> 
+                                            <strong>Lecturer:</strong> ${escapeHtml(reg.lecturer_name || 'Unknown')}
+                                        </div>
+                                        <div class="mb-1">
+                                            <i class="bi bi-calendar"></i> 
+                                            <strong>Registered:</strong> ${formatDate(reg.registered_at)}
+                                        </div>
+                                        ${reg.reviewed_at ? `
+                                        <div class="mb-1">
+                                            <i class="bi bi-clock-history"></i> 
+                                            <strong>Reviewed:</strong> ${formatDate(reg.reviewed_at)}
+                                        </div>
+                                        ` : ''}
+                                        ${reg.rejection_reason ? `
+                                        <div class="alert alert-danger mt-2 mb-0">
+                                            <strong>Rejection Reason:</strong> ${escapeHtml(reg.rejection_reason)}
+                                        </div>
+                                        ` : ''}
+                                    </div>
+                                </div>
+                                <div class="ms-3">
+                                    <span class="badge ${statusBadge} fs-6">
+                                        <i class="bi ${statusIcon}"></i> ${reg.status}
+                                    </span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        /**
+         * Get status badge class
+         */
+        function getStatusBadge(status) {
+            switch(status) {
+                case 'Approved': return 'bg-success';
+                case 'Pending': return 'bg-warning text-dark';
+                case 'Rejected': return 'bg-danger';
+                default: return 'bg-secondary';
+            }
+        }
+
+        /**
+         * Get status icon
+         */
+        function getStatusIcon(status) {
+            switch(status) {
+                case 'Approved': return 'bi-check-circle-fill';
+                case 'Pending': return 'bi-clock-history';
+                case 'Rejected': return 'bi-x-circle-fill';
+                default: return 'bi-question-circle';
+            }
+        }
+
+        /**
+         * Truncate text
+         */
+        function truncateText(text, maxLength) {
+            if (!text) return '';
+            if (text.length <= maxLength) return text;
+            return text.substring(0, maxLength) + '...';
         }
 
         /**
@@ -663,35 +1133,53 @@
         function formatDate(dateString) {
             if (!dateString) return 'N/A';
             const date = new Date(dateString);
-            return date.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
+            return date.toLocaleDateString('en-US', { 
+                year: 'numeric', 
+                month: 'short', 
+                day: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit'
+            });
         }
 
         /**
          * Escape HTML to prevent XSS
          */
         function escapeHtml(text) {
+            if (!text) return '';
             const div = document.createElement('div');
             div.textContent = text;
             return div.innerHTML;
         }
 
         /**
-         * Browse topics
+         * Show toast notification
          */
-        function browseTopic() {
-            window.location.href = '/capstone_project/app/views/student/register.php';
+        function showToast(title, message, type = 'success') {
+            const toastHtml = `
+                <div class="position-fixed top-0 end-0 p-3" style="z-index: 11000">
+                    <div class="toast show" role="alert">
+                        <div class="toast-header bg-${type} text-white">
+                            <i class="bi bi-${type === 'success' ? 'check-circle' : 'info-circle'}-fill me-2"></i>
+                            <strong class="me-auto">${title}</strong>
+                            <button type="button" class="btn-close btn-close-white" data-bs-dismiss="toast"></button>
+                        </div>
+                        <div class="toast-body">
+                            ${message}
+                        </div>
+                    </div>
+                </div>
+            `;
+            
+            const toastContainer = document.createElement('div');
+            toastContainer.innerHTML = toastHtml;
+            document.body.appendChild(toastContainer);
+            
+            // Auto remove after 5 seconds
+            setTimeout(() => {
+                toastContainer.remove();
+            }, 5000);
         }
-
-        /**
-         * View registrations
-         */
-        function viewRegistrations() {
-            showAlert('Registration details feature coming soon!', 'info');
-        }
-
-        /**
-         * Handle logout
-         */
         async function handleLogout() {
             if (!confirm('Are you sure you want to logout?')) {
                 return;
