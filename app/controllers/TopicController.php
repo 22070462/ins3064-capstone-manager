@@ -913,4 +913,425 @@ class TopicController extends Controller
             }
         }
     }
+
+    /**
+     * Get student's approved project (GET /api/topics/my-project/{studentId})
+     * Student only - returns approved project with detailed information
+     * 
+     * @param int $studentId Student ID
+     * @return void
+     */
+    public function getMyProject(int $studentId): void
+    {
+        try {
+            // AUTHORIZATION: Require Student role
+            if (!$this->middleware->requireStudent(true)) {
+                return;
+            }
+
+            // Verify student is accessing their own data
+            $currentUser = $this->middleware->getCurrentUser();
+            $currentUserId = $currentUser['id'] ?? null;
+
+            if (!$this->verifyStudentOwnership($studentId, $currentUserId)) {
+                $this->jsonError('You can only view your own project.', 403);
+                return;
+            }
+
+            // Fetch approved project
+            $project = $this->topicRepository->getStudentApprovedProject($studentId);
+
+            if (!$project) {
+                $this->jsonSuccess(
+                    null,
+                    'No approved project found'
+                );
+                return;
+            }
+
+            $this->jsonSuccess(
+                $project,
+                'Project retrieved successfully'
+            );
+
+        } catch (Exception $e) {
+            error_log("Get my project error: " . $e->getMessage());
+            $this->jsonError('Failed to retrieve project', 500);
+        }
+    }
+
+    /**
+     * Update project progress (POST /api/topics/my-project/progress)
+     * Student only - update project completion percentage and notes
+     * 
+     * @return void
+     */
+    public function updateProjectProgress(): void
+    {
+        try {
+            // AUTHORIZATION: Require Student role
+            if (!$this->middleware->requireStudent(true)) {
+                return;
+            }
+
+            // Validate request method
+            if (!$this->isPost()) {
+                $this->jsonError('Invalid request method. POST required.', 405);
+                return;
+            }
+
+            // Get JSON input
+            $input = $this->getJsonInput(true);
+
+            if (!$input) {
+                $this->jsonError('Invalid JSON input', 400);
+                return;
+            }
+
+            // Get current user info
+            $currentUser = $this->middleware->getCurrentUser();
+            $studentId = $currentUser['student_id'] ?? null;
+            $userId = $currentUser['id'] ?? null;
+
+            if (!$studentId) {
+                $this->jsonError('Student information not found', 403);
+                return;
+            }
+
+            // Validate progress percentage
+            $progress = isset($input['progress']) ? filter_var($input['progress'], FILTER_VALIDATE_INT) : null;
+            
+            if ($progress === null || $progress === false) {
+                $this->jsonError('Progress value is required', 400);
+                return;
+            }
+            
+            if ($progress < 0 || $progress > 100) {
+                $this->jsonError('Progress must be between 0 and 100', 400);
+                return;
+            }
+
+            $notes = isset($input['notes']) ? $this->sanitize($input['notes']) : null;
+
+            // Update project progress
+            $result = $this->topicRepository->updateProjectProgress($studentId, $progress, $notes, $userId);
+
+            $this->jsonSuccess(
+                $result['data'],
+                $result['message']
+            );
+
+        } catch (Exception $e) {
+            $statusCode = (int) $e->getCode();
+
+            if ($statusCode === 404) {
+                $this->jsonError($e->getMessage(), 404);
+            } else {
+                error_log("Update project progress error: " . $e->getMessage());
+                $this->jsonError(
+                    'An error occurred while updating project progress. Please try again.',
+                    500,
+                    ['error' => $e->getMessage()]
+                );
+            }
+        }
+    }
+
+    /**
+     * ==================================================
+     * SUBMISSION MANAGEMENT ENDPOINTS
+     * ==================================================
+     */
+
+    /**
+     * Get active milestones (GET /api/submissions/milestones)
+     * Student only
+     * 
+     * @return void
+     */
+    public function getMilestones(): void
+    {
+        try {
+            // AUTHORIZATION: Require Student role
+            if (!$this->middleware->requireStudent(true)) {
+                return;
+            }
+
+            // Get current user info
+            $currentUser = $this->middleware->getCurrentUser();
+            $studentId = $currentUser['student_id'] ?? null;
+
+            if (!$studentId) {
+                $this->jsonError('Student information not found', 403);
+                return;
+            }
+
+            // Fetch milestones with submission status
+            $milestones = $this->topicRepository->getMilestonesWithSubmissionStatus($studentId);
+
+            $this->jsonSuccess(
+                $milestones,
+                'Milestones retrieved successfully'
+            );
+
+        } catch (Exception $e) {
+            error_log("Get milestones error: " . $e->getMessage());
+            $this->jsonError('Failed to retrieve milestones', 500);
+        }
+    }
+
+    /**
+     * Get student's submissions (GET /api/submissions/my-submissions)
+     * Student only
+     * 
+     * @return void
+     */
+    public function getMySubmissions(): void
+    {
+        try {
+            // AUTHORIZATION: Require Student role
+            if (!$this->middleware->requireStudent(true)) {
+                return;
+            }
+
+            // Get current user info
+            $currentUser = $this->middleware->getCurrentUser();
+            $studentId = $currentUser['student_id'] ?? null;
+
+            if (!$studentId) {
+                $this->jsonError('Student information not found', 403);
+                return;
+            }
+
+            // Fetch student's submissions
+            $submissions = $this->topicRepository->getStudentSubmissions($studentId);
+
+            $this->jsonSuccess(
+                $submissions,
+                'Submissions retrieved successfully'
+            );
+
+        } catch (Exception $e) {
+            error_log("Get submissions error: " . $e->getMessage());
+            $this->jsonError('Failed to retrieve submissions', 500);
+        }
+    }
+
+    /**
+     * Create a new submission (POST /api/submissions/submit)
+     * Student only
+     * 
+     * Required POST parameters:
+     * - milestone_id: int
+     * - file_url: string (path to uploaded file)
+     * - file_name: string
+     * - comments: string (optional)
+     * 
+     * @return void
+     */
+    public function submitWork(): void
+    {
+        try {
+            // AUTHORIZATION: Require Student role
+            if (!$this->middleware->requireStudent(true)) {
+                return;
+            }
+
+            // Validate request method
+            if (!$this->isPost()) {
+                $this->jsonError('Invalid request method. POST required.', 405);
+                return;
+            }
+
+            // Get JSON input or POST data
+            $input = $this->getJsonInput(true) ?? $this->getPost();
+
+            // Validate required fields
+            $required = ['milestone_id', 'file_url', 'file_name'];
+            $missing = $this->validateRequired($input, $required);
+
+            if (!empty($missing)) {
+                $this->jsonError(
+                    'Missing required fields: ' . implode(', ', $missing),
+                    400,
+                    ['missing_fields' => $missing]
+                );
+                return;
+            }
+
+            // Sanitize and validate input
+            $milestoneId = filter_var($input['milestone_id'], FILTER_VALIDATE_INT);
+
+            if ($milestoneId === false) {
+                $this->jsonError('Invalid milestone ID', 400);
+                return;
+            }
+
+            // Get current user info
+            $currentUser = $this->middleware->getCurrentUser();
+            $studentId = $currentUser['student_id'] ?? null;
+            $userId = $currentUser['id'] ?? null;
+
+            if (!$studentId) {
+                $this->jsonError('Student information not found', 403);
+                return;
+            }
+
+            // Prepare submission data
+            $data = [
+                'milestone_id' => $milestoneId,
+                'file_url'     => $this->sanitize($input['file_url']),
+                'file_name'    => $this->sanitize($input['file_name']),
+                'comments'     => isset($input['comments']) ? $this->sanitize($input['comments']) : null
+            ];
+
+            // Create submission through repository
+            $result = $this->topicRepository->createSubmission($data, $studentId, $userId);
+
+            // Return success response
+            $this->jsonSuccess(
+                $result['data'],
+                $result['message']
+            );
+
+        } catch (Exception $e) {
+            $statusCode = (int) $e->getCode();
+
+            if ($statusCode === 404) {
+                $this->jsonError($e->getMessage(), 404);
+            } elseif ($statusCode === 403) {
+                $this->jsonError($e->getMessage(), 403);
+            } elseif ($statusCode === 400) {
+                $this->jsonError($e->getMessage(), 400);
+            } else {
+                error_log("Submit work error: " . $e->getMessage());
+                $this->jsonError(
+                    'An error occurred while submitting your work. Please try again.',
+                    500,
+                    ['error' => $e->getMessage()]
+                );
+            }
+        }
+    }
+
+    /**
+     * Get submission details (GET /api/submissions/{id})
+     * Student only - can only view own submissions
+     * 
+     * @param int $id Submission ID
+     * @return void
+     */
+    public function getSubmissionDetails(int $id): void
+    {
+        try {
+            // AUTHORIZATION: Require Student role
+            if (!$this->middleware->requireStudent(true)) {
+                return;
+            }
+
+            // Validate ID
+            if ($id <= 0) {
+                $this->jsonError('Invalid submission ID', 400);
+                return;
+            }
+
+            // Get current user info
+            $currentUser = $this->middleware->getCurrentUser();
+            $studentId = $currentUser['student_id'] ?? null;
+
+            if (!$studentId) {
+                $this->jsonError('Student information not found', 403);
+                return;
+            }
+
+            // Fetch submission details
+            $submission = $this->topicRepository->getSubmissionById($id);
+
+            if (!$submission) {
+                $this->jsonError('Submission not found', 404);
+                return;
+            }
+
+            // Verify ownership
+            if ($submission['student_id'] != $studentId) {
+                $this->jsonError('You can only view your own submissions', 403);
+                return;
+            }
+
+            $this->jsonSuccess(
+                $submission,
+                'Submission details retrieved successfully'
+            );
+
+        } catch (Exception $e) {
+            error_log("Get submission details error: " . $e->getMessage());
+            $this->jsonError('Failed to retrieve submission details', 500);
+        }
+    }
+
+    /**
+     * Delete a submission (DELETE /api/submissions/{id})
+     * Student only - can only delete own submissions (before grading)
+     * 
+     * @param int $id Submission ID
+     * @return void
+     */
+    public function deleteSubmission(int $id): void
+    {
+        try {
+            // AUTHORIZATION: Require Student role
+            if (!$this->middleware->requireStudent(true)) {
+                return;
+            }
+
+            // Validate request method
+            if (!$this->isDelete()) {
+                $this->jsonError('Invalid request method. DELETE required.', 405);
+                return;
+            }
+
+            // Validate ID
+            if ($id <= 0) {
+                $this->jsonError('Invalid submission ID', 400);
+                return;
+            }
+
+            // Get current user info
+            $currentUser = $this->middleware->getCurrentUser();
+            $studentId = $currentUser['student_id'] ?? null;
+            $userId = $currentUser['id'] ?? null;
+
+            if (!$studentId) {
+                $this->jsonError('Student information not found', 403);
+                return;
+            }
+
+            // Delete submission through repository
+            $result = $this->topicRepository->deleteSubmission($id, $studentId, $userId);
+
+            // Return success response
+            $this->jsonSuccess(
+                $result['data'],
+                $result['message']
+            );
+
+        } catch (Exception $e) {
+            $statusCode = (int) $e->getCode();
+
+            if ($statusCode === 404) {
+                $this->jsonError($e->getMessage(), 404);
+            } elseif ($statusCode === 403) {
+                $this->jsonError($e->getMessage(), 403);
+            } elseif ($statusCode === 400) {
+                $this->jsonError($e->getMessage(), 400);
+            } else {
+                error_log("Delete submission error: " . $e->getMessage());
+                $this->jsonError(
+                    'An error occurred while deleting the submission. Please try again.',
+                    500,
+                    ['error' => $e->getMessage()]
+                );
+            }
+        }
+    }
 }

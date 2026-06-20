@@ -275,6 +275,8 @@ class Middleware
     /**
      * Login user and create session
      * 
+     * SECURITY FIX: Removed debug logging that exposes sensitive session data
+     * 
      * @param array $userData User data to store in session
      * @return void
      */
@@ -291,8 +293,8 @@ class Middleware
         $_SESSION['login_time'] = time();
         $_SESSION['ip_address'] = $_SERVER['REMOTE_ADDR'] ?? 'unknown';
         
-        // Debug log
-        error_log("Middleware login() - Session user data stored: " . print_r($_SESSION['user'], true));
+        // REMOVED: Debug log that exposes sensitive session data
+        // This was a security vulnerability
     }
 
     /**

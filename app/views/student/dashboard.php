@@ -11,6 +11,12 @@
     <!-- Bootstrap Icons -->
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css">
     
+    <!-- My Project Styles -->
+    <link rel="stylesheet" href="/capstone_project/app/views/student/my_project.css">
+    
+    <!-- Profile Styles -->
+    <link rel="stylesheet" href="/capstone_project/app/views/student/profile.css">
+    
     <style>
         :root {
             --primary-gradient: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
@@ -224,6 +230,38 @@
         .badge {
             font-size: 12px;
             padding: 5px 10px;
+        }
+        
+        /* Topic Card Hover Effect */
+        .topic-card {
+            transition: all 0.3s ease;
+        }
+        
+        .topic-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 5px 20px rgba(0,0,0,0.15);
+        }
+        
+        /* Enhanced Status Badges */
+        .status-badge-large {
+            font-size: 14px;
+            padding: 8px 15px;
+            font-weight: 600;
+        }
+        
+        /* Topic Details Modal Styling */
+        .topic-details h4 {
+            border-bottom: 2px solid #667eea;
+            padding-bottom: 10px;
+        }
+        
+        .topic-details .bg-light {
+            border-left: 4px solid #667eea;
+        }
+        
+        /* Filter Section */
+        .form-select-sm, .form-control-sm {
+            border-radius: 6px;
         }
         
         /* Timeline */
@@ -467,6 +505,33 @@
         </div>
     </div>
 
+    <!-- Topic Details Modal -->
+    <div class="modal fade" id="topicDetailsModal" tabindex="-1" aria-labelledby="topicDetailsModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header bg-primary text-white">
+                    <h5 class="modal-title" id="topicDetailsModalLabel">
+                        <i class="bi bi-journal-text"></i> Topic Details
+                    </h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body" id="topicDetailsContent">
+                    <div class="text-center py-5">
+                        <div class="spinner-border text-primary" role="status">
+                            <span class="visually-hidden">Loading...</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                    <button type="button" class="btn btn-primary" id="modalRegisterBtn" style="display: none;">
+                        <i class="bi bi-check-circle"></i> Register for This Topic
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- Bootstrap JS -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
 
@@ -479,6 +544,8 @@
         let currentUserId = null;
         let studentRegistrations = [];
         let availableTopics = [];
+        let allDepartments = [];
+        let allLecturers = [];
 
         // Initialize on page load
         document.addEventListener('DOMContentLoaded', function() {
@@ -564,6 +631,12 @@
                         showBrowseTopicsSection();
                     } else if (page === 'my-registrations') {
                         showMyRegistrationsSection();
+                    } else if (page === 'my-project') {
+                        showMyProjectSection();
+                    } else if (page === 'submissions') {
+                        showSubmissionsSection();
+                    } else if (page === 'profile') {
+                        showProfileSection();
                     } else if (page === 'dashboard') {
                         location.reload(); // Reload dashboard
                     } else {
@@ -785,7 +858,7 @@
                                 </div>
                                 ${canWithdraw ? `
                                 <div class="mt-2">
-                                    <button class="btn btn-danger btn-sm" onclick="withdrawRegistration()">
+                                    <button class="btn btn-outline-danger btn-sm" onclick="withdrawRegistration()">
                                         <i class="bi bi-x-circle"></i> Withdraw
                                     </button>
                                 </div>
@@ -842,11 +915,30 @@
                         <div class="d-flex justify-content-between align-items-center mb-3">
                             <h5 class="mb-0">
                                 <i class="bi bi-journal-text"></i> Available Topics
-                                <span class="badge bg-primary">${availableTopics.length}</span>
+                                <span class="badge bg-primary" id="topicsCountBadge">${availableTopics.length}</span>
                             </h5>
-                            <div>
+                        </div>
+                        
+                        <!-- Filters Row -->
+                        <div class="row mb-3">
+                            <div class="col-md-4 mb-2">
                                 <input type="text" class="form-control form-control-sm" id="searchTopics" 
-                                       placeholder="Search topics..." style="width: 250px;">
+                                       placeholder="🔍 Search by title, description, or lecturer...">
+                            </div>
+                            <div class="col-md-3 mb-2">
+                                <select class="form-select form-select-sm" id="filterDepartment">
+                                    <option value="">All Departments</option>
+                                </select>
+                            </div>
+                            <div class="col-md-3 mb-2">
+                                <select class="form-select form-select-sm" id="filterLecturer">
+                                    <option value="">All Lecturers</option>
+                                </select>
+                            </div>
+                            <div class="col-md-2 mb-2">
+                                <button class="btn btn-sm btn-outline-secondary w-100" onclick="clearFilters()">
+                                    <i class="bi bi-x-circle"></i> Clear
+                                </button>
                             </div>
                         </div>
                         
@@ -856,18 +948,13 @@
                     </div>
                 `;
                 
+                // Populate filter dropdowns
+                populateFilters();
+                
                 // Setup search functionality
-                document.getElementById('searchTopics')?.addEventListener('input', function(e) {
-                    const searchTerm = e.target.value.toLowerCase();
-                    const filteredTopics = availableTopics.filter(topic => 
-                        topic.title.toLowerCase().includes(searchTerm) ||
-                        topic.description.toLowerCase().includes(searchTerm) ||
-                        (topic.lecturer_name && topic.lecturer_name.toLowerCase().includes(searchTerm))
-                    );
-                    
-                    const container = document.getElementById('topicsContainer');
-                    container.innerHTML = renderTopicsGridFiltered(filteredTopics, hasActiveRegistration);
-                });
+                document.getElementById('searchTopics')?.addEventListener('input', applyFilters);
+                document.getElementById('filterDepartment')?.addEventListener('change', applyFilters);
+                document.getElementById('filterLecturer')?.addEventListener('change', applyFilters);
                 
             } catch (error) {
                 console.error('Browse topics error:', error);
@@ -875,6 +962,84 @@
             } finally {
                 showLoading(false);
             }
+        }
+
+        /**
+         * Populate filter dropdowns
+         */
+        function populateFilters() {
+            // Extract unique departments
+            const departments = [...new Set(availableTopics.map(t => t.department_name).filter(Boolean))];
+            const departmentSelect = document.getElementById('filterDepartment');
+            if (departmentSelect) {
+                departments.forEach(dept => {
+                    const option = document.createElement('option');
+                    option.value = dept;
+                    option.textContent = dept;
+                    departmentSelect.appendChild(option);
+                });
+            }
+            
+            // Extract unique lecturers
+            const lecturers = [...new Set(availableTopics.map(t => t.lecturer_name).filter(Boolean))];
+            const lecturerSelect = document.getElementById('filterLecturer');
+            if (lecturerSelect) {
+                lecturers.forEach(lect => {
+                    const option = document.createElement('option');
+                    option.value = lect;
+                    option.textContent = lect;
+                    lecturerSelect.appendChild(option);
+                });
+            }
+        }
+
+        /**
+         * Apply all filters
+         */
+        function applyFilters() {
+            const searchTerm = document.getElementById('searchTopics')?.value.toLowerCase() || '';
+            const departmentFilter = document.getElementById('filterDepartment')?.value || '';
+            const lecturerFilter = document.getElementById('filterLecturer')?.value || '';
+            
+            const filteredTopics = availableTopics.filter(topic => {
+                // Search filter
+                const matchesSearch = !searchTerm || 
+                    topic.title.toLowerCase().includes(searchTerm) ||
+                    topic.description.toLowerCase().includes(searchTerm) ||
+                    (topic.lecturer_name && topic.lecturer_name.toLowerCase().includes(searchTerm));
+                
+                // Department filter
+                const matchesDepartment = !departmentFilter || topic.department_name === departmentFilter;
+                
+                // Lecturer filter
+                const matchesLecturer = !lecturerFilter || topic.lecturer_name === lecturerFilter;
+                
+                return matchesSearch && matchesDepartment && matchesLecturer;
+            });
+            
+            // Update count badge
+            const countBadge = document.getElementById('topicsCountBadge');
+            if (countBadge) {
+                countBadge.textContent = filteredTopics.length;
+            }
+            
+            // Check if student has active registration
+            const hasActiveRegistration = studentRegistrations.some(
+                r => r.status === 'Pending' || r.status === 'Approved'
+            );
+            
+            const container = document.getElementById('topicsContainer');
+            container.innerHTML = renderTopicsGridFiltered(filteredTopics, hasActiveRegistration);
+        }
+
+        /**
+         * Clear all filters
+         */
+        function clearFilters() {
+            document.getElementById('searchTopics').value = '';
+            document.getElementById('filterDepartment').value = '';
+            document.getElementById('filterLecturer').value = '';
+            applyFilters();
         }
 
         /**
@@ -940,7 +1105,7 @@
                         
                         return `
                             <div class="col-md-6 col-lg-4 mb-3">
-                                <div class="card h-100">
+                                <div class="card h-100 topic-card" style="cursor: pointer; transition: all 0.3s;">
                                     <div class="card-body">
                                         <h6 class="card-title text-primary">
                                             <i class="bi bi-journal-text"></i>
@@ -949,15 +1114,23 @@
                                         <p class="card-text small text-muted mb-2">
                                             <i class="bi bi-person"></i> ${escapeHtml(topic.lecturer_name || 'Unknown')}
                                         </p>
+                                        <p class="card-text small text-muted mb-2">
+                                            <i class="bi bi-building"></i> ${escapeHtml(topic.department_name || 'N/A')}
+                                        </p>
                                         <p class="card-text small">
                                             ${escapeHtml(truncateText(topic.description, 100))}
                                         </p>
                                         <div class="d-flex justify-content-between align-items-center mt-3">
                                             <small class="text-muted">
                                                 <i class="bi bi-people"></i> 
-                                                ${topic.current_students || 0}/${topic.max_students || 5} students
+                                                ${topic.current_registrations || 0}/${topic.max_students || 5}
                                             </small>
-                                            ${buttonHtml}
+                                            <div>
+                                                <button class="btn btn-sm btn-outline-primary me-1" onclick="event.stopPropagation(); viewTopicDetails(${topic.id})">
+                                                    <i class="bi bi-eye"></i> View
+                                                </button>
+                                                ${buttonHtml}
+                                            </div>
                                         </div>
                                     </div>
                                 </div>
@@ -966,6 +1139,144 @@
                     }).join('')}
                 </div>
             `;
+        }
+
+        /**
+         * View topic details in modal
+         */
+        async function viewTopicDetails(topicId) {
+            const modal = new bootstrap.Modal(document.getElementById('topicDetailsModal'));
+            const modalContent = document.getElementById('topicDetailsContent');
+            const modalRegisterBtn = document.getElementById('modalRegisterBtn');
+            
+            // Show modal with loading state
+            modal.show();
+            modalContent.innerHTML = `
+                <div class="text-center py-5">
+                    <div class="spinner-border text-primary" role="status">
+                        <span class="visually-hidden">Loading...</span>
+                    </div>
+                    <p class="mt-2 text-muted">Loading topic details...</p>
+                </div>
+            `;
+            
+            try {
+                // Fetch topic details from API
+                const response = await fetch(`${API_BASE_URL}/topics/${topicId}`, {
+                    method: 'GET',
+                    headers: { 'Accept': 'application/json' },
+                    credentials: 'same-origin'
+                });
+
+                if (!response.ok) {
+                    throw new Error('Failed to load topic details');
+                }
+
+                const result = await response.json();
+                const topic = result.data;
+
+                // Check if student already registered for this topic
+                const alreadyRegistered = studentRegistrations.some(r => r.topic_id === topic.id);
+                const hasActiveRegistration = studentRegistrations.some(
+                    r => r.status === 'Pending' || r.status === 'Approved'
+                );
+                
+                // Render topic details
+                modalContent.innerHTML = `
+                    <div class="topic-details">
+                        <div class="mb-4">
+                            <h4 class="text-primary mb-3">
+                                <i class="bi bi-journal-text"></i> ${escapeHtml(topic.title)}
+                            </h4>
+                            
+                            <div class="row mb-3">
+                                <div class="col-md-6">
+                                    <p class="mb-2">
+                                        <i class="bi bi-person text-primary"></i>
+                                        <strong>Lecturer:</strong> ${escapeHtml(topic.lecturer_name || 'Unknown')}
+                                    </p>
+                                    <p class="mb-2">
+                                        <i class="bi bi-building text-primary"></i>
+                                        <strong>Department:</strong> ${escapeHtml(topic.department_name || 'N/A')}
+                                    </p>
+                                    <p class="mb-2">
+                                        <i class="bi bi-envelope text-primary"></i>
+                                        <strong>Email:</strong> ${escapeHtml(topic.lecturer_email || 'N/A')}
+                                    </p>
+                                </div>
+                                <div class="col-md-6">
+                                    <p class="mb-2">
+                                        <i class="bi bi-people text-primary"></i>
+                                        <strong>Capacity:</strong> ${topic.approved_count || 0}/${topic.max_students || 5} students
+                                    </p>
+                                    <p class="mb-2">
+                                        <i class="bi bi-calendar text-primary"></i>
+                                        <strong>Created:</strong> ${formatDate(topic.created_at)}
+                                    </p>
+                                    <p class="mb-2">
+                                        <i class="bi bi-info-circle text-primary"></i>
+                                        <strong>Status:</strong> 
+                                        <span class="badge bg-success">${topic.status}</span>
+                                    </p>
+                                </div>
+                            </div>
+                            
+                            ${topic.tags ? `
+                            <div class="mb-3">
+                                <strong><i class="bi bi-tags"></i> Tags:</strong>
+                                ${topic.tags.split(',').map(tag => 
+                                    `<span class="badge bg-secondary me-1">${escapeHtml(tag.trim())}</span>`
+                                ).join('')}
+                            </div>
+                            ` : ''}
+                        </div>
+                        
+                        <div class="mb-3">
+                            <h6 class="text-secondary mb-2">
+                                <i class="bi bi-file-text"></i> Description
+                            </h6>
+                            <div class="p-3 bg-light rounded">
+                                <p class="mb-0" style="white-space: pre-wrap;">${escapeHtml(topic.description || 'No description available')}</p>
+                            </div>
+                        </div>
+                        
+                        ${alreadyRegistered ? `
+                        <div class="alert alert-info">
+                            <i class="bi bi-info-circle-fill"></i>
+                            <strong>Already Registered:</strong> You have already registered for this topic.
+                        </div>
+                        ` : ''}
+                        
+                        ${hasActiveRegistration && !alreadyRegistered ? `
+                        <div class="alert alert-warning">
+                            <i class="bi bi-exclamation-triangle-fill"></i>
+                            <strong>Registration Locked:</strong> You have an active registration for another topic.
+                        </div>
+                        ` : ''}
+                    </div>
+                `;
+                
+                // Show/hide register button
+                if (!alreadyRegistered && !hasActiveRegistration) {
+                    modalRegisterBtn.style.display = 'inline-block';
+                    modalRegisterBtn.onclick = () => {
+                        modal.hide();
+                        registerForTopic(topic.id, topic.lecturer_id || topic.created_by);
+                    };
+                } else {
+                    modalRegisterBtn.style.display = 'none';
+                }
+
+            } catch (error) {
+                console.error('View topic details error:', error);
+                modalContent.innerHTML = `
+                    <div class="alert alert-danger">
+                        <i class="bi bi-exclamation-triangle-fill"></i>
+                        <strong>Error:</strong> Failed to load topic details. Please try again.
+                    </div>
+                `;
+                modalRegisterBtn.style.display = 'none';
+            }
         }
 
         /**
@@ -1233,7 +1544,7 @@
                                     </div>
                                     ${canWithdraw ? `
                                     <div class="mt-3">
-                                        <button class="btn btn-danger btn-sm" onclick="withdrawRegistration()">
+                                        <button class="btn btn-outline-danger btn-sm" onclick="withdrawRegistration()">
                                             <i class="bi bi-x-circle"></i> Withdraw Registration
                                         </button>
                                         <small class="text-muted ms-2">
@@ -1243,7 +1554,7 @@
                                     ` : ''}
                                 </div>
                                 <div class="ms-3">
-                                    <span class="badge ${statusBadge} fs-6">
+                                    <span class="badge ${statusBadge} status-badge-large">
                                         <i class="bi ${statusIcon}"></i> ${reg.status}
                                     </span>
                                 </div>
@@ -1255,19 +1566,20 @@
         }
 
         /**
-         * Get status badge class
+         * Get status badge class with enhanced colors
          */
         function getStatusBadge(status) {
             switch(status) {
                 case 'Approved': return 'bg-success';
                 case 'Pending': return 'bg-warning text-dark';
                 case 'Rejected': return 'bg-danger';
+                case 'Withdrawn': return 'bg-secondary';
                 default: return 'bg-secondary';
             }
         }
 
         /**
-         * Get status icon
+         * Get status icon with better visual indicators
          */
         function getStatusIcon(status) {
             switch(status) {
@@ -1427,5 +1739,17 @@
             }
         }
     </script>
+
+    <!-- My Project Functions -->
+    <script src="/capstone_project/app/views/student/my_project_functions.js"></script>
+
+    <!-- Enhanced Features Script -->
+    <script src="/capstone_project/app/views/student/dashboard_enhancements.js"></script>
+    
+    <!-- Submissions Module -->
+    <script src="/capstone_project/app/views/student/submissions.js"></script>
+    
+    <!-- Profile Module -->
+    <script src="/capstone_project/app/views/student/profile.js"></script>
 </body>
 </html>

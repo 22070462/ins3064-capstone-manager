@@ -1,0 +1,142 @@
+/**
+ * My Project Feature Styles
+ */
+
+/* Progress Circle */
+.circular-chart {
+    display: block;
+    margin: 10px auto;
+    max-width: 100%;
+    max-height: 250px;
+}
+
+.circle-bg {
+    fill: none;
+    stroke: #eee;
+    stroke-width: 3.8;
+}
+
+.circle {
+    fill: none;
+    stroke-width: 2.8;
+    stroke-linecap: round;
+    animation: progress 1s ease-out forwards;
+}
+
+@keyframes progress {
+    0% {
+        stroke-dasharray: 0 100;
+    }
+}
+
+.circular-chart.red .circle {
+    stroke: #dc3545;
+}
+
+.circular-chart.orange .circle {
+    stroke: #fd7e14;
+}
+
+.circular-chart.blue .circle {
+    stroke: #0d6efd;
+}
+
+.circular-chart.green .circle {
+    stroke: #28a745;
+}
+
+.percentage {
+    fill: #333;
+    font-family: sans-serif;
+    font-size: 0.5em;
+    text-anchor: middle;
+    font-weight: bold;
+}
+
+/* Project Card Styles */
+.project-info-section {
+    border-left: 4px solid #667eea;
+    padding-left: 15px;
+    margin-bottom: 20px;
+}
+
+.project-info-section h6 {
+    color: #667eea;
+    font-weight: 600;
+    margin-bottom: 10px;
+}
+
+/* Progress Slider */
+.form-range::-webkit-slider-thumb {
+    background: #667eea;
+}
+
+.form-range::-moz-range-thumb {
+    background: #667eea;
+}
+
+.form-range::-webkit-slider-thumb:hover {
+    background: #764ba2;
+}
+
+.form-range::-moz-range-thumb:hover {
+    background: #764ba2;
+}
+
+/* Timeline Styles (if not already defined) */
+.timeline {
+    position: relative;
+    padding-left: 30px;
+    margin-top: 20px;
+}
+
+.timeline::before {
+    content: '';
+    position: absolute;
+    left: 10px;
+    top: 0;
+    bottom: 0;
+    width: 2px;
+    background: #ddd;
+}
+
+.timeline-item {
+    position: relative;
+    padding-bottom: 20px;
+}
+
+.timeline-item::before {
+    content: '';
+    position: absolute;
+    left: -24px;
+    top: 5px;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: #667eea;
+    border: 2px solid white;
+    box-shadow: 0 0 0 2px #667eea;
+}
+
+.timeline-date {
+    font-size: 12px;
+    color: #999;
+    margin-bottom: 5px;
+}
+
+.timeline-content {
+    font-size: 14px;
+    color: #555;
+}
+
+.timeline-content strong {
+    color: #333;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+    .progress-circle {
+        width: 100px !important;
+        height: 100px !important;
+    }
+}

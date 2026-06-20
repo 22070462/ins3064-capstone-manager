@@ -11,6 +11,9 @@
     <!-- Bootstrap Icons -->
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css">
     
+    <!-- My Students Styles -->
+    <link rel="stylesheet" href="/capstone_project/app/views/lecturer/my_students.css">
+    
     <!-- Chart.js -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
     
@@ -368,6 +371,14 @@
                     if (!currentLecturerId) {
                         showAlert('Lecturer information not found. Please contact administrator.', 'danger');
                     }
+                    
+                    // Update lecturer name in sidebar
+                    const fullName = result.data?.full_name || 'Lecturer';
+                    document.getElementById('lecturerName').textContent = fullName;
+                    
+                    // Update user avatar initial
+                    const initial = fullName.charAt(0).toUpperCase();
+                    document.getElementById('userAvatar').textContent = initial;
                 } else {
                     console.error('Failed to load user info:', response.status);
                 }
@@ -423,6 +434,15 @@
                     break;
                 case 'registrations':
                     await showRegistrationsPage();
+                    break;
+                case 'students':
+                    await showMyStudentsPage();
+                    break;
+                case 'evaluations':
+                    await showEvaluationsPage();
+                    break;
+                case 'profile':
+                    await showProfilePage();
                     break;
                 default:
                     pageContent.innerHTML = `
@@ -1692,6 +1712,879 @@
                 overlay.classList.remove('active');
             }
         }
+
+        /**
+         * Show evaluations page
+         */
+        async function showEvaluationsPage() {
+            const pageContent = document.getElementById('pageContent');
+            pageContent.innerHTML = `
+                <div class="card">
+                    <div class="card-header bg-warning text-dark">
+                        <h5 class="mb-0"><i class="bi bi-star"></i> Student Evaluations</h5>
+                    </div>
+                    <div class="card-body">
+                        <!-- Filter Tabs -->
+                        <ul class="nav nav-tabs mb-3" id="evaluationTabs" role="tablist">
+                            <li class="nav-item" role="presentation">
+                                <button class="nav-link active" id="pending-eval-tab" data-bs-toggle="tab" data-bs-target="#pending-eval" type="button" role="tab">
+                                    <i class="bi bi-clock"></i> Pending Evaluation
+                                </button>
+                            </li>
+                            <li class="nav-item" role="presentation">
+                                <button class="nav-link" id="partial-eval-tab" data-bs-toggle="tab" data-bs-target="#partial-eval" type="button" role="tab">
+                                    <i class="bi bi-hourglass-split"></i> Partial
+                                </button>
+                            </li>
+                            <li class="nav-item" role="presentation">
+                                <button class="nav-link" id="completed-eval-tab" data-bs-toggle="tab" data-bs-target="#completed-eval" type="button" role="tab">
+                                    <i class="bi bi-check-circle"></i> Completed
+                                </button>
+                            </li>
+                            <li class="nav-item" role="presentation">
+                                <button class="nav-link" id="summary-tab" data-bs-toggle="tab" data-bs-target="#summary" type="button" role="tab">
+                                    <i class="bi bi-graph-up"></i> Summary
+                                </button>
+                            </li>
+                        </ul>
+
+                        <!-- Tab Content -->
+                        <div class="tab-content" id="evaluationTabContent">
+                            <div class="tab-pane fade show active" id="pending-eval" role="tabpanel">
+                                <div id="pendingEvaluations">
+                                    <div class="text-center py-4">
+                                        <div class="spinner-border text-primary" role="status"></div>
+                                        <p class="mt-2">Loading...</p>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="tab-pane fade" id="partial-eval" role="tabpanel">
+                                <div id="partialEvaluations">
+                                    <div class="text-center py-4">
+                                        <div class="spinner-border text-primary" role="status"></div>
+                                        <p class="mt-2">Loading...</p>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="tab-pane fade" id="completed-eval" role="tabpanel">
+                                <div id="completedEvaluations">
+                                    <div class="text-center py-4">
+                                        <div class="spinner-border text-primary" role="status"></div>
+                                        <p class="mt-2">Loading...</p>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="tab-pane fade" id="summary" role="tabpanel">
+                                <div id="evaluationSummary">
+                                    <div class="text-center py-4">
+                                        <div class="spinner-border text-primary" role="status"></div>
+                                        <p class="mt-2">Loading...</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+            
+            // Load submissions
+            await loadSubmissionsToEvaluate();
+        }
+
+        /**
+         * Load submissions to evaluate
+         */
+        async function loadSubmissionsToEvaluate() {
+            try {
+                const response = await fetch(`${API_BASE_URL}/lecturers/submissions-to-evaluate`, {
+                    method: 'GET',
+                    headers: { 'Accept': 'application/json' },
+                    credentials: 'same-origin'
+                });
+                
+                const result = await response.json();
+                
+                if (response.ok && result.success) {
+                    const submissions = result.data || [];
+                    
+                    // Group by evaluation status
+                    const pending = submissions.filter(s => s.evaluation_status === 'Pending');
+                    const partial = submissions.filter(s => s.evaluation_status === 'Partial');
+                    const completed = submissions.filter(s => s.evaluation_status === 'Completed');
+                    
+                    // Render each group
+                    renderSubmissionsList('pendingEvaluations', pending);
+                    renderSubmissionsList('partialEvaluations', partial);
+                    renderSubmissionsList('completedEvaluations', completed);
+                    
+                } else {
+                    showAlert(result.message || 'Failed to load submissions', 'danger');
+                }
+            } catch (error) {
+                console.error('Load submissions error:', error);
+                showAlert('Network error. Please try again.', 'danger');
+            }
+        }
+
+        /**
+         * Render submissions list
+         */
+        function renderSubmissionsList(containerId, submissions) {
+            const container = document.getElementById(containerId);
+            
+            if (!container) return;
+            
+            if (submissions.length === 0) {
+                container.innerHTML = `
+                    <div class="text-center text-muted py-4">
+                        <i class="bi bi-inbox" style="font-size: 48px;"></i>
+                        <p class="mt-2">No submissions</p>
+                    </div>
+                `;
+                return;
+            }
+            
+            container.innerHTML = submissions.map(sub => {
+                const statusClass = sub.evaluation_status === 'Completed' ? 'success' : 
+                                   sub.evaluation_status === 'Partial' ? 'warning' : 'secondary';
+                const lateClass = sub.is_late == '1' ? 'text-danger' : '';
+                
+                return `
+                    <div class="card mb-3 shadow-sm">
+                        <div class="card-body">
+                            <div class="row">
+                                <div class="col-md-8">
+                                    <h6 class="card-title">
+                                        <i class="bi bi-person-circle text-primary"></i>
+                                        ${escapeHtml(sub.student_name)} (${sub.student_code})
+                                    </h6>
+                                    <p class="mb-1">
+                                        <strong>Topic:</strong> ${escapeHtml(sub.topic_title)}
+                                    </p>
+                                    <p class="mb-1">
+                                        <strong>Milestone:</strong> ${escapeHtml(sub.milestone_title)}
+                                        <span class="badge bg-info ms-2">${sub.weight_percentage}% weight</span>
+                                    </p>
+                                    <p class="mb-1">
+                                        <strong>Submitted:</strong> 
+                                        <span class="${lateClass}">${formatDateTime(sub.submitted_at)}</span>
+                                        ${sub.is_late == '1' ? '<span class="badge bg-danger ms-2">LATE</span>' : ''}
+                                    </p>
+                                    <p class="mb-1">
+                                        <strong>Deadline:</strong> ${formatDate(sub.deadline)}
+                                    </p>
+                                    ${sub.submission_comments ? `<p class="mb-1 text-muted"><em>${escapeHtml(sub.submission_comments)}</em></p>` : ''}
+                                    <div class="mt-2">
+                                        <span class="badge bg-${statusClass}">
+                                            ${sub.evaluation_status}
+                                        </span>
+                                        ${sub.evaluation_count > 0 ? `
+                                            <span class="badge bg-info">
+                                                ${sub.evaluation_count}/${sub.total_rubrics} criteria evaluated
+                                            </span>
+                                        ` : ''}
+                                        ${sub.average_score > 0 ? `
+                                            <span class="badge bg-success">
+                                                Average: ${parseFloat(sub.average_score).toFixed(2)}
+                                            </span>
+                                        ` : ''}
+                                    </div>
+                                </div>
+                                <div class="col-md-4 text-end">
+                                    <div class="d-grid gap-2">
+                                        ${sub.file_url ? `
+                                            <a href="${escapeHtml(sub.file_url)}" target="_blank" class="btn btn-sm btn-outline-primary" title="Download submission">
+                                                <i class="bi bi-download"></i> Download
+                                            </a>
+                                        ` : ''}
+                                        <button class="btn btn-sm btn-warning" onclick="openEvaluationModal(${sub.submission_id}, '${escapeHtml(sub.student_name)}', '${escapeHtml(sub.milestone_title)}')">
+                                            <i class="bi bi-star"></i> ${sub.evaluation_status === 'Completed' ? 'View/Edit' : 'Evaluate'}
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        /**
+         * Open evaluation modal
+         */
+        async function openEvaluationModal(submissionId, studentName, milestoneTitle) {
+            showLoading(true);
+            
+            try {
+                // Get submission details first to get milestone_id
+                const submissionsResponse = await fetch(`${API_BASE_URL}/lecturers/submissions-to-evaluate`, {
+                    method: 'GET',
+                    headers: { 'Accept': 'application/json' },
+                    credentials: 'same-origin'
+                });
+                
+                const submissionsResult = await submissionsResponse.json();
+                const submission = submissionsResult.data?.find(s => s.submission_id == submissionId);
+                
+                if (!submission) {
+                    showAlert('Submission not found', 'danger');
+                    return;
+                }
+                
+                const milestoneId = submission.milestone_id;
+                
+                // Load rubrics and existing scores in parallel
+                const [rubricsResponse, scoresResponse] = await Promise.all([
+                    fetch(`${API_BASE_URL}/lecturers/evaluation-rubrics/${milestoneId}`, {
+                        method: 'GET',
+                        headers: { 'Accept': 'application/json' },
+                        credentials: 'same-origin'
+                    }),
+                    fetch(`${API_BASE_URL}/lecturers/evaluation-scores/${submissionId}`, {
+                        method: 'GET',
+                        headers: { 'Accept': 'application/json' },
+                        credentials: 'same-origin'
+                    })
+                ]);
+                
+                const rubricsResult = await rubricsResponse.json();
+                const scoresResult = await scoresResponse.json();
+                
+                if (!rubricsResponse.ok || !rubricsResult.success) {
+                    showAlert(rubricsResult.message || 'Failed to load rubrics', 'danger');
+                    return;
+                }
+                
+                const rubrics = rubricsResult.data || [];
+                const existingScores = scoresResult.success ? (scoresResult.data || []) : [];
+                
+                if (rubrics.length === 0) {
+                    showAlert('No evaluation rubrics defined for this milestone', 'warning');
+                    return;
+                }
+                
+                // Create scores map for easy lookup
+                const scoresMap = {};
+                existingScores.forEach(score => {
+                    scoresMap[score.rubric_id] = score;
+                });
+                
+                // Build modal HTML
+                const modalHtml = `
+                    <div class="modal fade" id="evaluationModal" tabindex="-1">
+                        <div class="modal-dialog modal-xl">
+                            <div class="modal-content">
+                                <div class="modal-header bg-warning">
+                                    <h5 class="modal-title">
+                                        <i class="bi bi-star"></i> Evaluate Submission
+                                    </h5>
+                                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                                </div>
+                                <div class="modal-body">
+                                    <div class="alert alert-info">
+                                        <strong>Student:</strong> ${escapeHtml(studentName)}<br>
+                                        <strong>Milestone:</strong> ${escapeHtml(milestoneTitle)}
+                                    </div>
+                                    
+                                    <form id="evaluationForm">
+                                        <input type="hidden" id="evalSubmissionId" value="${submissionId}">
+                                        
+                                        ${rubrics.map((rubric, index) => {
+                                            const existingScore = scoresMap[rubric.id];
+                                            return `
+                                                <div class="card mb-3">
+                                                    <div class="card-header">
+                                                        <strong>${index + 1}. ${escapeHtml(rubric.criteria_name)}</strong>
+                                                        <span class="badge bg-info float-end">Max: ${rubric.max_score}</span>
+                                                    </div>
+                                                    <div class="card-body">
+                                                        ${rubric.description ? `<p class="text-muted mb-3">${escapeHtml(rubric.description)}</p>` : ''}
+                                                        
+                                                        <div class="row">
+                                                            <div class="col-md-3">
+                                                                <label class="form-label">Score <span class="text-danger">*</span></label>
+                                                                <input type="number" 
+                                                                       class="form-control rubric-score" 
+                                                                       data-rubric-id="${rubric.id}"
+                                                                       data-max="${rubric.max_score}"
+                                                                       min="0" 
+                                                                       max="${rubric.max_score}" 
+                                                                       step="0.5"
+                                                                       value="${existingScore ? existingScore.score : ''}"
+                                                                       required>
+                                                            </div>
+                                                            <div class="col-md-9">
+                                                                <label class="form-label">Comments</label>
+                                                                <textarea class="form-control rubric-comment" 
+                                                                          data-rubric-id="${rubric.id}"
+                                                                          rows="2"
+                                                                          placeholder="Feedback for this criterion...">${existingScore ? escapeHtml(existingScore.comments || '') : ''}</textarea>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            `;
+                                        }).join('')}
+                                        
+                                        <div class="alert alert-secondary">
+                                            <div class="row">
+                                                <div class="col-md-6">
+                                                    <strong>Total Score:</strong> <span id="totalScore">0</span> / <span id="totalMax">${rubrics.reduce((sum, r) => sum + parseFloat(r.max_score), 0)}</span>
+                                                </div>
+                                                <div class="col-md-6 text-end">
+                                                    <strong>Percentage:</strong> <span id="totalPercentage">0</span>%
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </form>
+                                </div>
+                                <div class="modal-footer">
+                                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+                                        <i class="bi bi-x-circle"></i> Cancel
+                                    </button>
+                                    <button type="button" class="btn btn-warning" onclick="submitEvaluation()">
+                                        <i class="bi bi-check-circle"></i> Submit Evaluation
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+                
+                // Remove old modal if exists
+                const oldModal = document.getElementById('evaluationModal');
+                if (oldModal) oldModal.remove();
+                
+                // Add modal to body
+                document.body.insertAdjacentHTML('beforeend', modalHtml);
+                
+                // Setup score calculation
+                document.querySelectorAll('.rubric-score').forEach(input => {
+                    input.addEventListener('input', updateTotalScore);
+                });
+                
+                // Calculate initial total
+                updateTotalScore();
+                
+                // Show modal
+                const modal = new bootstrap.Modal(document.getElementById('evaluationModal'));
+                modal.show();
+                
+            } catch (error) {
+                console.error('Open evaluation modal error:', error);
+                showAlert('Network error. Please try again.', 'danger');
+            } finally {
+                showLoading(false);
+            }
+        }
+
+        /**
+         * Update total score display
+         */
+        function updateTotalScore() {
+            let totalScore = 0;
+            let totalMax = 0;
+            
+            document.querySelectorAll('.rubric-score').forEach(input => {
+                const score = parseFloat(input.value) || 0;
+                const max = parseFloat(input.getAttribute('data-max')) || 0;
+                totalScore += score;
+                totalMax += max;
+            });
+            
+            const percentage = totalMax > 0 ? (totalScore / totalMax * 100) : 0;
+            
+            document.getElementById('totalScore').textContent = totalScore.toFixed(2);
+            document.getElementById('totalMax').textContent = totalMax.toFixed(2);
+            document.getElementById('totalPercentage').textContent = percentage.toFixed(2);
+        }
+
+        /**
+         * Submit evaluation
+         */
+        async function submitEvaluation() {
+            const submissionId = document.getElementById('evalSubmissionId').value;
+            
+            // Collect scores
+            const scores = [];
+            const scoreInputs = document.querySelectorAll('.rubric-score');
+            
+            for (const input of scoreInputs) {
+                const rubricId = input.getAttribute('data-rubric-id');
+                const score = parseFloat(input.value);
+                const max = parseFloat(input.getAttribute('data-max'));
+                
+                if (isNaN(score) || score < 0) {
+                    showAlert('Please enter valid scores for all criteria', 'warning');
+                    return;
+                }
+                
+                if (score > max) {
+                    showAlert(`Score cannot exceed maximum (${max}) for criterion ${rubricId}`, 'warning');
+                    return;
+                }
+                
+                const commentInput = document.querySelector(`.rubric-comment[data-rubric-id="${rubricId}"]`);
+                const comments = commentInput ? commentInput.value.trim() : null;
+                
+                scores.push({
+                    rubric_id: parseInt(rubricId),
+                    score: score,
+                    comments: comments
+                });
+            }
+            
+            if (scores.length === 0) {
+                showAlert('No scores to submit', 'warning');
+                return;
+            }
+            
+            showLoading(true);
+            
+            try {
+                const response = await fetch(`${API_BASE_URL}/lecturers/evaluate-submission`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Accept': 'application/json'
+                    },
+                    credentials: 'same-origin',
+                    body: JSON.stringify({
+                        submission_id: parseInt(submissionId),
+                        scores: scores
+                    })
+                });
+                
+                const result = await response.json();
+                
+                if (response.ok && result.success) {
+                    showAlert('Evaluation submitted successfully!', 'success');
+                    
+                    // Close modal
+                    const modal = bootstrap.Modal.getInstance(document.getElementById('evaluationModal'));
+                    if (modal) modal.hide();
+                    
+                    // Reload submissions
+                    await loadSubmissionsToEvaluate();
+                } else {
+                    showAlert(result.message || 'Failed to submit evaluation', 'danger');
+                }
+            } catch (error) {
+                console.error('Submit evaluation error:', error);
+                showAlert('Network error. Please try again.', 'danger');
+            } finally {
+                showLoading(false);
+            }
+        }
+
+        /**
+         * Format date and time
+         */
+        function formatDateTime(dateString) {
+            if (!dateString) return 'N/A';
+            const date = new Date(dateString);
+            return date.toLocaleString('en-US', { 
+                year: 'numeric', 
+                month: 'short', 
+                day: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit'
+            });
+        }
+
+        /**
+         * Show profile page
+         */
+        async function showProfilePage() {
+            const pageContent = document.getElementById('pageContent');
+            pageContent.innerHTML = `
+                <div class="row">
+                    <!-- Profile Information Card -->
+                    <div class="col-md-8 mb-4">
+                        <div class="card">
+                            <div class="card-header bg-primary text-white">
+                                <h5 class="mb-0"><i class="bi bi-person-circle"></i> Profile Information</h5>
+                            </div>
+                            <div class="card-body">
+                                <div id="profileContent">
+                                    <div class="text-center py-4">
+                                        <div class="spinner-border text-primary" role="status"></div>
+                                        <p class="mt-2">Loading profile...</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Change Password Card -->
+                        <div class="card mt-4">
+                            <div class="card-header bg-warning text-dark">
+                                <h5 class="mb-0"><i class="bi bi-shield-lock"></i> Change Password</h5>
+                            </div>
+                            <div class="card-body">
+                                <form id="changePasswordForm">
+                                    <div class="mb-3">
+                                        <label for="currentPassword" class="form-label">Current Password <span class="text-danger">*</span></label>
+                                        <input type="password" class="form-control" id="currentPassword" required>
+                                    </div>
+                                    <div class="mb-3">
+                                        <label for="newPassword" class="form-label">New Password <span class="text-danger">*</span></label>
+                                        <input type="password" class="form-control" id="newPassword" required minlength="6">
+                                        <small class="text-muted">Minimum 6 characters</small>
+                                    </div>
+                                    <div class="mb-3">
+                                        <label for="confirmPassword" class="form-label">Confirm New Password <span class="text-danger">*</span></label>
+                                        <input type="password" class="form-control" id="confirmPassword" required minlength="6">
+                                    </div>
+                                    <button type="submit" class="btn btn-warning">
+                                        <i class="bi bi-key"></i> Change Password
+                                    </button>
+                                </form>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Statistics Card -->
+                    <div class="col-md-4 mb-4">
+                        <div class="card">
+                            <div class="card-header bg-info text-white">
+                                <h5 class="mb-0"><i class="bi bi-graph-up"></i> Statistics</h5>
+                            </div>
+                            <div class="card-body">
+                                <div id="profileStats">
+                                    <div class="text-center py-4">
+                                        <div class="spinner-border text-info" role="status"></div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Account Info Card -->
+                        <div class="card mt-4">
+                            <div class="card-header bg-secondary text-white">
+                                <h5 class="mb-0"><i class="bi bi-info-circle"></i> Account Info</h5>
+                            </div>
+                            <div class="card-body">
+                                <div id="accountInfo">
+                                    <div class="text-center py-4">
+                                        <div class="spinner-border text-secondary" role="status"></div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+            
+            // Load profile data
+            await loadProfileData();
+            
+            // Setup form handlers
+            document.getElementById('changePasswordForm').addEventListener('submit', handleChangePassword);
+        }
+
+        /**
+         * Load profile data
+         */
+        async function loadProfileData() {
+            try {
+                const response = await fetch(`${API_BASE_URL}/lecturers/profile`, {
+                    method: 'GET',
+                    headers: { 'Accept': 'application/json' },
+                    credentials: 'same-origin'
+                });
+                
+                const result = await response.json();
+                
+                if (response.ok && result.success) {
+                    const profile = result.data;
+                    renderProfileInfo(profile);
+                    renderProfileStats(profile.statistics);
+                    renderAccountInfo(profile);
+                } else {
+                    showAlert(result.message || 'Failed to load profile', 'danger');
+                }
+            } catch (error) {
+                console.error('Load profile error:', error);
+                showAlert('Network error. Please try again.', 'danger');
+            }
+        }
+
+        /**
+         * Render profile information
+         */
+        function renderProfileInfo(profile) {
+            const container = document.getElementById('profileContent');
+            
+            container.innerHTML = `
+                <form id="profileForm">
+                    <div class="row mb-3">
+                        <div class="col-md-6">
+                            <label class="form-label"><strong>Lecturer Code</strong></label>
+                            <input type="text" class="form-control" value="${escapeHtml(profile.lecturer_code)}" disabled>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label"><strong>Username</strong></label>
+                            <input type="text" class="form-control" value="${escapeHtml(profile.username)}" disabled>
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="profileFullName" class="form-label"><strong>Full Name</strong> <span class="text-danger">*</span></label>
+                        <input type="text" class="form-control" id="profileFullName" value="${escapeHtml(profile.full_name)}" required>
+                    </div>
+
+                    <div class="row mb-3">
+                        <div class="col-md-6">
+                            <label for="profileEmail" class="form-label"><strong>Email</strong></label>
+                            <input type="email" class="form-control" id="profileEmail" value="${escapeHtml(profile.email || '')}">
+                        </div>
+                        <div class="col-md-6">
+                            <label for="profilePhone" class="form-label"><strong>Phone</strong></label>
+                            <input type="tel" class="form-control" id="profilePhone" value="${escapeHtml(profile.phone || '')}">
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label"><strong>Department</strong></label>
+                        <input type="text" class="form-control" value="${escapeHtml(profile.department_name)}" disabled>
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="profileSpecialization" class="form-label"><strong>Specialization</strong></label>
+                        <textarea class="form-control" id="profileSpecialization" rows="3" placeholder="e.g., Machine Learning, AI, Data Science">${escapeHtml(profile.specialization || '')}</textarea>
+                        <small class="text-muted">Your areas of expertise</small>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label"><strong>Max Quota</strong></label>
+                        <input type="number" class="form-control" value="${profile.max_quota}" disabled>
+                        <small class="text-muted">Maximum number of students you can supervise</small>
+                    </div>
+
+                    <div class="d-flex gap-2">
+                        <button type="submit" class="btn btn-primary">
+                            <i class="bi bi-check-circle"></i> Update Profile
+                        </button>
+                        <button type="button" class="btn btn-secondary" onclick="loadProfileData()">
+                            <i class="bi bi-arrow-clockwise"></i> Reset
+                        </button>
+                    </div>
+                </form>
+            `;
+            
+            // Setup form submission
+            document.getElementById('profileForm').addEventListener('submit', handleUpdateProfile);
+        }
+
+        /**
+         * Render profile statistics
+         */
+        function renderProfileStats(stats) {
+            const container = document.getElementById('profileStats');
+            
+            container.innerHTML = `
+                <div class="mb-3">
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                        <span><i class="bi bi-journal-text text-primary"></i> Total Topics</span>
+                        <strong class="fs-4">${stats.total_topics}</strong>
+                    </div>
+                    <div class="progress" style="height: 5px;">
+                        <div class="progress-bar bg-primary" style="width: 100%"></div>
+                    </div>
+                </div>
+
+                <div class="mb-3">
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                        <span><i class="bi bi-check-circle text-success"></i> Published Topics</span>
+                        <strong class="fs-4">${stats.published_topics}</strong>
+                    </div>
+                    <div class="progress" style="height: 5px;">
+                        <div class="progress-bar bg-success" style="width: ${stats.total_topics > 0 ? (stats.published_topics / stats.total_topics * 100) : 0}%"></div>
+                    </div>
+                </div>
+
+                <div class="mb-3">
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                        <span><i class="bi bi-people text-info"></i> Total Students</span>
+                        <strong class="fs-4">${stats.total_students}</strong>
+                    </div>
+                    <div class="progress" style="height: 5px;">
+                        <div class="progress-bar bg-info" style="width: 100%"></div>
+                    </div>
+                </div>
+
+                <div class="mb-3">
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                        <span><i class="bi bi-clock text-warning"></i> Pending Registrations</span>
+                        <strong class="fs-4">${stats.pending_registrations}</strong>
+                    </div>
+                    <div class="progress" style="height: 5px;">
+                        <div class="progress-bar bg-warning" style="width: 100%"></div>
+                    </div>
+                </div>
+
+                <hr>
+
+                <div class="text-center">
+                    <button class="btn btn-info btn-sm w-100" onclick="navigateTo('dashboard')">
+                        <i class="bi bi-speedometer2"></i> View Dashboard
+                    </button>
+                </div>
+            `;
+        }
+
+        /**
+         * Render account information
+         */
+        function renderAccountInfo(profile) {
+            const container = document.getElementById('accountInfo');
+            
+            const createdDate = new Date(profile.created_at);
+            const updatedDate = new Date(profile.updated_at);
+            
+            container.innerHTML = `
+                <div class="mb-3">
+                    <small class="text-muted d-block">Account Created</small>
+                    <strong>${createdDate.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}</strong>
+                </div>
+
+                <div class="mb-3">
+                    <small class="text-muted d-block">Last Updated</small>
+                    <strong>${updatedDate.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}</strong>
+                </div>
+
+                <div class="mb-3">
+                    <small class="text-muted d-block">User ID</small>
+                    <strong>${profile.user_id}</strong>
+                </div>
+
+                <div class="mb-3">
+                    <small class="text-muted d-block">Lecturer ID</small>
+                    <strong>${profile.id}</strong>
+                </div>
+            `;
+        }
+
+        /**
+         * Handle update profile form submission
+         */
+        async function handleUpdateProfile(e) {
+            e.preventDefault();
+            
+            const fullName = document.getElementById('profileFullName').value.trim();
+            const email = document.getElementById('profileEmail').value.trim();
+            const phone = document.getElementById('profilePhone').value.trim();
+            const specialization = document.getElementById('profileSpecialization').value.trim();
+            
+            if (!fullName) {
+                showAlert('Full name is required', 'warning');
+                return;
+            }
+            
+            showLoading(true);
+            
+            try {
+                const response = await fetch(`${API_BASE_URL}/lecturers/profile`, {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Accept': 'application/json'
+                    },
+                    credentials: 'same-origin',
+                    body: JSON.stringify({
+                        full_name: fullName,
+                        email: email,
+                        phone: phone,
+                        specialization: specialization
+                    })
+                });
+                
+                const result = await response.json();
+                
+                if (response.ok && result.success) {
+                    showAlert('Profile updated successfully!', 'success');
+                    
+                    // Update sidebar name if changed
+                    if (result.data && result.data.full_name) {
+                        document.getElementById('lecturerName').textContent = result.data.full_name;
+                    }
+                    
+                    // Reload profile data
+                    await loadProfileData();
+                } else {
+                    showAlert(result.message || 'Failed to update profile', 'danger');
+                }
+            } catch (error) {
+                console.error('Update profile error:', error);
+                showAlert('Network error. Please try again.', 'danger');
+            } finally {
+                showLoading(false);
+            }
+        }
+
+        /**
+         * Handle change password form submission
+         */
+        async function handleChangePassword(e) {
+            e.preventDefault();
+            
+            const currentPassword = document.getElementById('currentPassword').value;
+            const newPassword = document.getElementById('newPassword').value;
+            const confirmPassword = document.getElementById('confirmPassword').value;
+            
+            // Validate passwords
+            if (newPassword.length < 6) {
+                showAlert('New password must be at least 6 characters', 'warning');
+                return;
+            }
+            
+            if (newPassword !== confirmPassword) {
+                showAlert('New passwords do not match', 'warning');
+                return;
+            }
+            
+            if (currentPassword === newPassword) {
+                showAlert('New password must be different from current password', 'warning');
+                return;
+            }
+            
+            showLoading(true);
+            
+            try {
+                const response = await fetch(`${API_BASE_URL}/lecturers/change-password`, {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Accept': 'application/json'
+                    },
+                    credentials: 'same-origin',
+                    body: JSON.stringify({
+                        current_password: currentPassword,
+                        new_password: newPassword,
+                        confirm_password: confirmPassword
+                    })
+                });
+                
+                const result = await response.json();
+                
+                if (response.ok && result.success) {
+                    showAlert('Password changed successfully!', 'success');
+                    
+                    // Clear form
+                    document.getElementById('changePasswordForm').reset();
+                } else {
+                    showAlert(result.message || 'Failed to change password', 'danger');
+                }
+            } catch (error) {
+                console.error('Change password error:', error);
+                showAlert('Network error. Please try again.', 'danger');
+            } finally {
+                showLoading(false);
+            }
+        }
     </script>
+
+    <!-- My Students Module -->
+    <script src="/capstone_project/app/views/lecturer/my_students.js"></script>
 </body>
 </html>
